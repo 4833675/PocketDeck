@@ -3,6 +3,8 @@
 #include <array>
 #include <utility>
 
+#include "core/g0_gesture.h"
+#include "core/input_router.h"
 #include "core/mac_keymap.h"
 
 using namespace pd;
@@ -100,6 +102,82 @@ TEST_CASE(more_than_six_keys_reports_rollover) {
     for (const uint8_t usage : report.keys) CHECK_EQ(usage, 0x01);
 }
 
+TEST_CASE(system_fn_navigation_is_local_and_edge_triggered) {
+    InputRouter router;
+    const KeyState left{PhysicalKey::Fn, PhysicalKey::Comma};
+    auto frame = router.update(left, InputMode::System, false);
+    CHECK_EQ(frame.eventCount, 1);
+    CHECK_EQ(frame.events[0].action, InputAction::Left);
+    CHECK(!frame.hasHidReport);
+
+    frame = router.update(left, InputMode::System, false);
+    CHECK_EQ(frame.eventCount, 0);
+}
+
+TEST_CASE(system_confirm_back_and_tab_are_local) {
+    InputRouter router;
+    auto frame = router.update(
+        KeyState{PhysicalKey::Enter, PhysicalKey::Backspace, PhysicalKey::Tab},
+        InputMode::System, false);
+    CHECK_EQ(frame.eventCount, 3);
+    CHECK_EQ(frame.events[0].action, InputAction::Confirm);
+    CHECK_EQ(frame.events[1].action, InputAction::Back);
+    CHECK_EQ(frame.events[2].action, InputAction::Tab);
+}
+
+TEST_CASE(keyboard_input_is_dropped_when_disconnected) {
+    InputRouter router;
+    auto frame = router.update(KeyState{PhysicalKey::A}, InputMode::Keyboard, false);
+    CHECK_EQ(frame.eventCount, 0);
+    CHECK(!frame.hasHidReport);
+}
+
+TEST_CASE(keyboard_input_becomes_hid_when_connected) {
+    InputRouter router;
+    router.update(KeyState{}, InputMode::Keyboard, true);
+    const auto frame = router.update(KeyState{PhysicalKey::A}, InputMode::Keyboard, true);
+    CHECK(frame.hasHidReport);
+    CHECK_EQ(frame.hidReport, HidReport::single(0, 0x04));
+}
+
+TEST_CASE(enter_used_to_open_keyboard_does_not_leak_to_mac) {
+    InputRouter router;
+    router.update(KeyState{PhysicalKey::Enter}, InputMode::System, false);
+    auto frame = router.update(KeyState{PhysicalKey::Enter}, InputMode::Keyboard, true);
+    CHECK(!frame.hasHidReport);
+
+    frame = router.update(KeyState{}, InputMode::Keyboard, true);
+    CHECK(frame.hasHidReport);
+    CHECK(frame.hidReport.empty());
+}
+
+TEST_CASE(reconnect_waits_for_held_keys_to_release) {
+    InputRouter router;
+    router.update(KeyState{PhysicalKey::A}, InputMode::Keyboard, false);
+    auto frame = router.update(KeyState{PhysicalKey::A}, InputMode::Keyboard, true);
+    CHECK(!frame.hasHidReport);
+    frame = router.update(KeyState{}, InputMode::Keyboard, true);
+    CHECK(frame.hasHidReport);
+    CHECK(frame.hidReport.empty());
+}
+
+TEST_CASE(g0_long_suppresses_short) {
+    G0Gesture gesture(600, 25);
+    CHECK_EQ(gesture.update(true, 100), G0Action::None);
+    CHECK_EQ(gesture.update(true, 130), G0Action::None);
+    CHECK_EQ(gesture.update(true, 730), G0Action::QuickSettings);
+    CHECK_EQ(gesture.update(false, 740), G0Action::None);
+    CHECK_EQ(gesture.update(false, 770), G0Action::None);
+}
+
+TEST_CASE(g0_short_fires_on_release) {
+    G0Gesture gesture(600, 25);
+    CHECK_EQ(gesture.update(true, 100), G0Action::None);
+    CHECK_EQ(gesture.update(true, 130), G0Action::None);
+    CHECK_EQ(gesture.update(false, 250), G0Action::None);
+    CHECK_EQ(gesture.update(false, 280), G0Action::Home);
+}
+
 int main() {
     plain_a();
     mac_modifiers();
@@ -108,5 +186,13 @@ int main() {
     punctuation_remains_available_without_fn();
     all_printable_keys_use_us_hid_usages();
     more_than_six_keys_reports_rollover();
+    system_fn_navigation_is_local_and_edge_triggered();
+    system_confirm_back_and_tab_are_local();
+    keyboard_input_is_dropped_when_disconnected();
+    keyboard_input_becomes_hid_when_connected();
+    enter_used_to_open_keyboard_does_not_leak_to_mac();
+    reconnect_waits_for_held_keys_to_release();
+    g0_long_suppresses_short();
+    g0_short_fires_on_release();
     return pd_test::finish();
 }
