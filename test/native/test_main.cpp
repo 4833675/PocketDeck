@@ -3,6 +3,7 @@
 #include <array>
 #include <utility>
 
+#include "apps/launcher/launcher_model.h"
 #include "core/g0_gesture.h"
 #include "core/input_router.h"
 #include "core/mac_keymap.h"
@@ -216,6 +217,25 @@ TEST_CASE(settings_sanitizer_clamps_and_repairs) {
     CHECK_STR_EQ(fixed.hostLabel.data(), "Mac");
 }
 
+TEST_CASE(launcher_starts_on_keyboard_and_wraps) {
+    LauncherModel model;
+    CHECK_EQ(model.selected(), AppId::Keyboard);
+    model.handle(InputAction::Right);
+    CHECK_EQ(model.selected(), AppId::Settings);
+    model.handle(InputAction::Right);
+    CHECK_EQ(model.selected(), AppId::Keyboard);
+    model.handle(InputAction::Left);
+    CHECK_EQ(model.selected(), AppId::Settings);
+}
+
+TEST_CASE(launcher_confirm_requests_selected_app) {
+    LauncherModel model;
+    CHECK_EQ(model.handle(InputAction::Confirm), AppId::Keyboard);
+    model.handle(InputAction::Right);
+    CHECK_EQ(model.handle(InputAction::Confirm), AppId::Settings);
+    CHECK_EQ(model.handle(InputAction::Back), AppId::None);
+}
+
 int main() {
     plain_a();
     mac_modifiers();
@@ -235,5 +255,7 @@ int main() {
     settings_defaults_are_valid();
     settings_version_mismatch_returns_defaults();
     settings_sanitizer_clamps_and_repairs();
+    launcher_starts_on_keyboard_and_wraps();
+    launcher_confirm_requests_selected_app();
     return pd_test::finish();
 }

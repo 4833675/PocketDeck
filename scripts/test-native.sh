@@ -5,7 +5,8 @@ cd "$(dirname "$0")/.."
 mkdir -p .build
 
 sources=(test/native/test_main.cpp src/core/mac_keymap.cpp)
-for source in src/core/input_router.cpp src/core/g0_gesture.cpp src/core/system_settings.cpp; do
+for source in src/core/input_router.cpp src/core/g0_gesture.cpp src/core/system_settings.cpp \
+              src/apps/launcher/launcher_model.cpp; do
     if [[ -f "$source" ]]; then
         sources+=("$source")
     fi
