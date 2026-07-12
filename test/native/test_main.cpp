@@ -6,6 +6,7 @@
 #include "core/g0_gesture.h"
 #include "core/input_router.h"
 #include "core/mac_keymap.h"
+#include "core/system_settings.h"
 
 using namespace pd;
 
@@ -178,6 +179,43 @@ TEST_CASE(g0_short_fires_on_release) {
     CHECK_EQ(gesture.update(false, 280), G0Action::Home);
 }
 
+TEST_CASE(settings_defaults_are_valid) {
+    const auto settings = SystemSettings::defaults();
+    CHECK_EQ(settings.version, SystemSettings::kVersion);
+    CHECK_EQ(settings.brightness, 78);
+    CHECK_EQ(settings.volume, 55);
+    CHECK_EQ(settings.sleepSeconds, 120);
+    CHECK(settings.keyClick);
+    CHECK(!settings.wifiEnabled);
+    CHECK(settings.bleEnabled);
+    CHECK_STR_EQ(settings.deviceName.data(), "Pocket Deck");
+    CHECK_STR_EQ(settings.hostLabel.data(), "Mac");
+}
+
+TEST_CASE(settings_version_mismatch_returns_defaults) {
+    auto settings = SystemSettings::defaults();
+    settings.version = 99;
+    settings.brightness = 255;
+    const auto fixed = sanitizeSettings(settings);
+    CHECK_EQ(fixed.version, SystemSettings::kVersion);
+    CHECK_EQ(fixed.brightness, 78);
+}
+
+TEST_CASE(settings_sanitizer_clamps_and_repairs) {
+    auto settings = SystemSettings::defaults();
+    settings.brightness = 255;
+    settings.volume = 200;
+    settings.sleepSeconds = 1;
+    settings.deviceName.fill('\0');
+    settings.hostLabel.fill('X');
+    const auto fixed = sanitizeSettings(settings);
+    CHECK_EQ(fixed.brightness, 100);
+    CHECK_EQ(fixed.volume, 100);
+    CHECK_EQ(fixed.sleepSeconds, 15);
+    CHECK_STR_EQ(fixed.deviceName.data(), "Pocket Deck");
+    CHECK_STR_EQ(fixed.hostLabel.data(), "Mac");
+}
+
 int main() {
     plain_a();
     mac_modifiers();
@@ -194,5 +232,8 @@ int main() {
     reconnect_waits_for_held_keys_to_release();
     g0_long_suppresses_short();
     g0_short_fires_on_release();
+    settings_defaults_are_valid();
+    settings_version_mismatch_returns_defaults();
+    settings_sanitizer_clamps_and_repairs();
     return pd_test::finish();
 }
