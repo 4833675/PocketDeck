@@ -6,6 +6,7 @@
 #include "core/system_context.h"
 #include "drivers/board.h"
 #include "drivers/display.h"
+#include "services/ble_keyboard_service.h"
 
 namespace pd {
 
@@ -23,6 +24,7 @@ private:
 
     Board board_;
     Display display_;
+    BleKeyboardService bleKeyboard_;
     InputRouter inputRouter_;
     G0Gesture g0Gesture_;
     SystemContext context_;
@@ -32,4 +34,3 @@ private:
 };
 
 }  // namespace pd
-

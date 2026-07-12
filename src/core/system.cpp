@@ -14,11 +14,15 @@ void System::begin() {
     board_.setBrightness(config::kDefaultBrightness);
     board_.setVolume(config::kDefaultVolume);
     const bool canvasReady = display_.begin();
+    const bool bleReady = bleKeyboard_.begin(config::kProductName);
     context_.batteryPercent = board_.batteryPercent();
+    const auto ble = bleKeyboard_.snapshot();
+    context_.bleEnabled = ble.enabled;
+    context_.bleConnected = ble.state == BleKeyboardState::Connected;
     current_ = &launcher_;
     current_->onEnter(context_);
-    Serial.printf("Pocket Deck %s board=%d canvas=%d\n", config::kFirmwareVersion,
-                  detected ? 1 : 0, canvasReady ? 1 : 0);
+    Serial.printf("Pocket Deck %s board=%d canvas=%d ble=%d\n", config::kFirmwareVersion,
+                  detected ? 1 : 0, canvasReady ? 1 : 0, bleReady ? 1 : 0);
     render();
 }
 
@@ -26,6 +30,10 @@ void System::update() {
     board_.update();
     const uint32_t nowMs = millis();
     context_.batteryPercent = board_.batteryPercent();
+    bleKeyboard_.updateBattery(context_.batteryPercent);
+    const auto ble = bleKeyboard_.snapshot();
+    context_.bleEnabled = ble.enabled;
+    context_.bleConnected = ble.state == BleKeyboardState::Connected;
 
     const G0Action g0 = g0Gesture_.update(board_.g0Down(), nowMs);
     if (g0 == G0Action::Home) goHome();
@@ -68,4 +76,3 @@ void System::render() {
 }
 
 }  // namespace pd
-

@@ -4,6 +4,7 @@
 #include <utility>
 
 #include "apps/launcher/launcher_model.h"
+#include "core/ble_keyboard_policy.h"
 #include "core/g0_gesture.h"
 #include "core/input_router.h"
 #include "core/mac_keymap.h"
@@ -236,6 +237,45 @@ TEST_CASE(launcher_confirm_requests_selected_app) {
     CHECK_EQ(model.handle(InputAction::Back), AppId::None);
 }
 
+TEST_CASE(single_host_policy_rejects_unknown_peer_after_bond) {
+    CHECK(BleKeyboardPolicy::peerAllowed(false, false));
+    CHECK(BleKeyboardPolicy::peerAllowed(true, true));
+    CHECK(!BleKeyboardPolicy::peerAllowed(true, false));
+}
+
+TEST_CASE(ble_report_gate_sends_release_then_deduplicates) {
+    BleKeyboardPolicy policy;
+    const HidReport letterA = HidReport::single(0, 0x04);
+    policy.setConnected(true);
+
+    auto decision = policy.nextReport(letterA);
+    CHECK(decision.send);
+    CHECK(decision.report.empty());
+
+    decision = policy.nextReport(letterA);
+    CHECK(decision.send);
+    CHECK_EQ(decision.report, letterA);
+
+    decision = policy.nextReport(letterA);
+    CHECK(!decision.send);
+
+    decision = policy.nextReport(HidReport{});
+    CHECK(decision.send);
+    CHECK(decision.report.empty());
+}
+
+TEST_CASE(disconnect_blocks_reports_and_resets_gate) {
+    BleKeyboardPolicy policy;
+    policy.setConnected(true);
+    policy.nextReport(HidReport{});
+    policy.setConnected(false);
+    CHECK(!policy.nextReport(HidReport::single(0, 0x04)).send);
+    policy.setConnected(true);
+    const auto decision = policy.nextReport(HidReport::single(0, 0x04));
+    CHECK(decision.send);
+    CHECK(decision.report.empty());
+}
+
 int main() {
     plain_a();
     mac_modifiers();
@@ -257,5 +297,8 @@ int main() {
     settings_sanitizer_clamps_and_repairs();
     launcher_starts_on_keyboard_and_wraps();
     launcher_confirm_requests_selected_app();
+    single_host_policy_rejects_unknown_peer_after_bond();
+    ble_report_gate_sends_release_then_deduplicates();
+    disconnect_blocks_reports_and_resets_gate();
     return pd_test::finish();
 }
