@@ -1,6 +1,7 @@
 #pragma once
 
 #include "apps/launcher/launcher_app.h"
+#include "apps/keyboard/keyboard_app.h"
 #include "core/g0_gesture.h"
 #include "core/input_router.h"
 #include "core/system_context.h"
@@ -29,6 +30,7 @@ private:
     G0Gesture g0Gesture_;
     SystemContext context_;
     LauncherApp launcher_;
+    KeyboardApp keyboard_;
     App* current_ = nullptr;
     uint32_t lastRenderMs_ = 0;
 };

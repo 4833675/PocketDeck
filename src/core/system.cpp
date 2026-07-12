@@ -15,6 +15,7 @@ void System::begin() {
     board_.setVolume(config::kDefaultVolume);
     const bool canvasReady = display_.begin();
     const bool bleReady = bleKeyboard_.begin(config::kProductName);
+    context_.bleKeyboard = &bleKeyboard_;
     context_.batteryPercent = board_.batteryPercent();
     const auto ble = bleKeyboard_.snapshot();
     context_.bleEnabled = ble.enabled;
@@ -38,8 +39,17 @@ void System::update() {
     const G0Action g0 = g0Gesture_.update(board_.g0Down(), nowMs);
     if (g0 == G0Action::Home) goHome();
 
-    const InputFrame frame = inputRouter_.update(board_.keyState(), InputMode::System,
+    const InputMode inputMode = current_->id() == AppId::Keyboard ? InputMode::Keyboard
+                                                                  : InputMode::System;
+    if (inputMode != InputMode::Keyboard || !context_.bleConnected) {
+        context_.activeModifiers = 0;
+    }
+    const InputFrame frame = inputRouter_.update(board_.keyState(), inputMode,
                                                   context_.bleConnected);
+    if (frame.hasHidReport && inputMode == InputMode::Keyboard) {
+        context_.activeModifiers = frame.hidReport.modifier;
+        bleKeyboard_.sendReport(frame.hidReport);
+    }
     for (uint8_t i = 0; i < frame.eventCount; ++i) current_->onInput(frame.events[i], context_);
     current_->update(nowMs, context_);
 
@@ -52,6 +62,7 @@ void System::update() {
 
 App* System::appForId(AppId id) {
     if (id == AppId::Launcher) return &launcher_;
+    if (id == AppId::Keyboard) return &keyboard_;
     return nullptr;
 }
 
@@ -60,7 +71,6 @@ void System::openApp(AppId id) {
     if (next == nullptr || next == current_) return;
     current_->onExit(context_);
     current_ = next;
-    inputRouter_.reset();
     current_->onEnter(context_);
 }
 

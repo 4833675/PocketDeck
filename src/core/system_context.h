@@ -6,11 +6,15 @@
 
 namespace pd {
 
+class BleKeyboardService;
+
 struct SystemContext {
     AppId requestedApp = AppId::None;
     uint8_t batteryPercent = 0;
     bool bleEnabled = true;
     bool bleConnected = false;
+    uint8_t activeModifiers = 0;
+    BleKeyboardService* bleKeyboard = nullptr;
 
     void requestApp(AppId app) { requestedApp = app; }
     AppId takeRequestedApp() {
@@ -21,4 +25,3 @@ struct SystemContext {
 };
 
 }  // namespace pd
-
