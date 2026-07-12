@@ -221,7 +221,7 @@ The HID service sends reports on key-state transitions and leaves keys logically
 ### 9.2 Security and pairing
 
 - LE Secure Connections, encrypted link, bonding, and passkey-based pairing.
-- On first pairing, the Mac displays a six-digit code; Pocket Deck temporarily routes numeric input and Enter to the pairing handler.
+- On first pairing, Pocket Deck displays a random six-digit passkey and the user enters it in the macOS pairing prompt. This uses the installed Arduino-ESP32 wrapper's safe DisplayOnly path instead of blocking its synchronous passkey-input callback while waiting for Cardputer keystrokes.
 - A successful bond is persisted by the BLE stack in NVS.
 - While a host bond exists, Pocket Deck does not silently accept a different host.
 - `Forget host & pair new` requires confirmation, disconnects, deletes the old bond, and deliberately re-enters pairing mode.
@@ -324,7 +324,7 @@ Tests must not include Arduino or M5 headers. Hardware adapters remain thin and 
 1. Boot reaches Home with Keyboard selected.
 2. G0 short/long actions work from Home, Keyboard, Settings, and dialogs.
 3. Wi-Fi scan, wrong-password error, successful connect, reboot reconnect, and forget all work.
-4. Initial Mac pairing succeeds with a passkey and survives Pocket Deck restart.
+4. Initial Mac pairing succeeds by entering Pocket Deck's displayed passkey on the Mac and survives Pocket Deck restart.
 5. Ordinary keys, Control/Option/Command/Shift, Fn arrows, F1–F12, Escape, Caps Lock, and Forward Delete match the specification.
 6. Holding and releasing key combinations produces correct transitions without stuck modifiers.
 7. Disconnect drops input; reconnect begins with all keys released.
