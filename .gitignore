@@ -1,0 +1,6 @@
+.worktrees/
+.pio/
+.build/
+.DS_Store
+*.bin
+*.elf
