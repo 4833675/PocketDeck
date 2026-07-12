@@ -4,11 +4,14 @@
 #include <utility>
 
 #include "apps/launcher/launcher_model.h"
+#include "apps/settings/settings_model.h"
 #include "core/ble_keyboard_policy.h"
 #include "core/g0_gesture.h"
 #include "core/input_router.h"
 #include "core/mac_keymap.h"
 #include "core/system_settings.h"
+#include "services/diagnostics_service.h"
+#include "ui/quick_settings_model.h"
 
 using namespace pd;
 
@@ -276,6 +279,122 @@ TEST_CASE(disconnect_blocks_reports_and_resets_gate) {
     CHECK(decision.report.empty());
 }
 
+TEST_CASE(diagnostics_ring_is_bounded_and_newest_first) {
+    DiagnosticsService diagnostics;
+    for (int index = 0; index < 14; ++index) diagnostics.logf("event %d", index);
+
+    CHECK_EQ(diagnostics.size(), DiagnosticsService::kCapacity);
+    CHECK_STR_EQ(diagnostics.newest(0), "event 13");
+    CHECK_STR_EQ(diagnostics.newest(11), "event 2");
+    CHECK_STR_EQ(diagnostics.newest(12), "");
+}
+
+TEST_CASE(diagnostics_messages_are_safely_truncated) {
+    DiagnosticsService diagnostics;
+    diagnostics.log("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ");
+    CHECK_EQ(std::char_traits<char>::length(diagnostics.newest(0)),
+             DiagnosticsService::kMessageCapacity - 1);
+}
+
+TEST_CASE(quick_settings_adjusts_values_and_clamps) {
+    QuickSettingsModel quick;
+    quick.open({95, 5, true});
+    auto result = quick.handle(InputAction::Right);
+    CHECK(result.valuesChanged);
+    CHECK_EQ(quick.values().brightness, 100);
+    result = quick.handle(InputAction::Down);
+    CHECK_EQ(quick.values().volume, 0);
+    result = quick.handle(InputAction::Confirm);
+    CHECK(!quick.values().bleEnabled);
+    CHECK(quick.dirty());
+}
+
+TEST_CASE(quick_settings_close_reports_whether_persistence_is_needed) {
+    QuickSettingsModel quick;
+    quick.open({78, 55, true});
+    auto result = quick.handle(InputAction::Back);
+    CHECK(result.closed);
+    CHECK(!result.persist);
+
+    quick.open({78, 55, true});
+    quick.handle(InputAction::Left);
+    result = quick.close();
+    CHECK(result.closed);
+    CHECK(result.persist);
+    CHECK(!quick.active());
+}
+
+TEST_CASE(settings_categories_open_and_back_out) {
+    SettingsModel model;
+    CHECK_EQ(model.page(), SettingsPage::Categories);
+    CHECK_EQ(model.category(), SettingsCategory::Bluetooth);
+    model.handle(InputAction::Down);
+    CHECK_EQ(model.category(), SettingsCategory::System);
+    model.handle(InputAction::Confirm);
+    CHECK_EQ(model.page(), SettingsPage::System);
+    model.handle(InputAction::Back);
+    CHECK_EQ(model.page(), SettingsPage::Categories);
+    const auto result = model.handle(InputAction::Back);
+    CHECK_EQ(result.effect, SettingsEffect::GoHome);
+}
+
+TEST_CASE(settings_destructive_actions_require_confirmation) {
+    SettingsModel model;
+    model.handle(InputAction::Confirm);
+    model.handle(InputAction::Down);
+    model.handle(InputAction::Down);
+    auto result = model.handle(InputAction::Confirm);
+    CHECK_EQ(result.effect, SettingsEffect::None);
+    CHECK_EQ(model.page(), SettingsPage::ConfirmForgetHost);
+    result = model.handle(InputAction::Back);
+    CHECK_EQ(result.effect, SettingsEffect::None);
+    CHECK_EQ(model.page(), SettingsPage::Bluetooth);
+
+    model.handle(InputAction::Confirm);
+    CHECK_EQ(model.page(), SettingsPage::ConfirmForgetHost);
+    result = model.handle(InputAction::Confirm);
+    CHECK_EQ(result.effect, SettingsEffect::ForgetHost);
+    CHECK_EQ(model.page(), SettingsPage::Bluetooth);
+}
+
+TEST_CASE(settings_bluetooth_controls_emit_explicit_effects) {
+    SettingsModel model;
+    model.handle(InputAction::Confirm);
+    auto result = model.handle(InputAction::Confirm);
+    CHECK_EQ(result.effect, SettingsEffect::ToggleBluetooth);
+    model.handle(InputAction::Down);
+    result = model.handle(InputAction::Confirm);
+    CHECK_EQ(result.effect, SettingsEffect::DisconnectBluetooth);
+}
+
+TEST_CASE(settings_system_actions_and_diagnostics_are_reachable) {
+    SettingsModel model;
+    model.handle(InputAction::Down);
+    model.handle(InputAction::Confirm);
+    auto result = model.handle(InputAction::Confirm);
+    CHECK_EQ(result.effect, SettingsEffect::None);
+    CHECK_EQ(model.page(), SettingsPage::Diagnostics);
+    model.handle(InputAction::Back);
+    model.handle(InputAction::Down);
+    model.handle(InputAction::Confirm);
+    CHECK_EQ(model.page(), SettingsPage::ConfirmRestart);
+    result = model.handle(InputAction::Confirm);
+    CHECK_EQ(result.effect, SettingsEffect::Restart);
+}
+
+TEST_CASE(settings_factory_reset_requires_its_own_confirmation) {
+    SettingsModel model;
+    model.handle(InputAction::Down);
+    model.handle(InputAction::Confirm);
+    model.handle(InputAction::Down);
+    model.handle(InputAction::Down);
+    auto result = model.handle(InputAction::Confirm);
+    CHECK_EQ(result.effect, SettingsEffect::None);
+    CHECK_EQ(model.page(), SettingsPage::ConfirmFactoryReset);
+    result = model.handle(InputAction::Confirm);
+    CHECK_EQ(result.effect, SettingsEffect::FactoryReset);
+}
+
 int main() {
     plain_a();
     mac_modifiers();
@@ -300,5 +419,14 @@ int main() {
     single_host_policy_rejects_unknown_peer_after_bond();
     ble_report_gate_sends_release_then_deduplicates();
     disconnect_blocks_reports_and_resets_gate();
+    diagnostics_ring_is_bounded_and_newest_first();
+    diagnostics_messages_are_safely_truncated();
+    quick_settings_adjusts_values_and_clamps();
+    quick_settings_close_reports_whether_persistence_is_needed();
+    settings_categories_open_and_back_out();
+    settings_destructive_actions_require_confirmation();
+    settings_bluetooth_controls_emit_explicit_effects();
+    settings_system_actions_and_diagnostics_are_reachable();
+    settings_factory_reset_requires_its_own_confirmation();
     return pd_test::finish();
 }

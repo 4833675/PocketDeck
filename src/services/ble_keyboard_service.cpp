@@ -205,8 +205,10 @@ bool BleKeyboardService::forgetHost() {
     bonded_.store(false);
     error_.store(BleKeyboardError::None);
     generatePasskey();
-    security_->setStaticPIN(passkey_.load());
-    security_->setAuthenticationMode(ESP_LE_AUTH_REQ_SC_MITM_BOND);
+    if (security_ != nullptr) {
+        security_->setStaticPIN(passkey_.load());
+        security_->setAuthenticationMode(ESP_LE_AUTH_REQ_SC_MITM_BOND);
+    }
     if (enabled_.load()) startAdvertising();
     Serial.println("[ble] host bond cleared");
     return true;
@@ -223,12 +225,12 @@ BleKeyboardSnapshot BleKeyboardService::snapshot() const {
 
     if (!result.enabled) {
         result.state = BleKeyboardState::Disabled;
+    } else if (result.error != BleKeyboardError::None) {
+        result.state = BleKeyboardState::Error;
     } else if (result.connected && result.encrypted) {
         result.state = BleKeyboardState::Connected;
     } else if (result.connected || !result.bonded) {
         result.state = BleKeyboardState::Pairing;
-    } else if (result.error != BleKeyboardError::None) {
-        result.state = BleKeyboardState::Error;
     } else {
         result.state = BleKeyboardState::Advertising;
     }

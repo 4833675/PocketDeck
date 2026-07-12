@@ -7,6 +7,17 @@
 namespace pd {
 
 class BleKeyboardService;
+class DiagnosticsService;
+struct SystemSettings;
+
+enum class SystemCommand : uint8_t {
+    None,
+    ToggleBluetooth,
+    DisconnectBluetooth,
+    ForgetHost,
+    Restart,
+    FactoryReset,
+};
 
 struct SystemContext {
     AppId requestedApp = AppId::None;
@@ -14,7 +25,13 @@ struct SystemContext {
     bool bleEnabled = true;
     bool bleConnected = false;
     uint8_t activeModifiers = 0;
+    uint32_t uptimeMs = 0;
+    uint32_t freeHeap = 0;
+    uint32_t minimumFreeHeap = 0;
+    const char* resetReason = "unknown";
     BleKeyboardService* bleKeyboard = nullptr;
+    const DiagnosticsService* diagnostics = nullptr;
+    const SystemSettings* settings = nullptr;
 
     void requestApp(AppId app) { requestedApp = app; }
     AppId takeRequestedApp() {
@@ -22,6 +39,16 @@ struct SystemContext {
         requestedApp = AppId::None;
         return requested;
     }
+
+    void requestCommand(SystemCommand command) { requestedCommand_ = command; }
+    SystemCommand takeRequestedCommand() {
+        const SystemCommand requested = requestedCommand_;
+        requestedCommand_ = SystemCommand::None;
+        return requested;
+    }
+
+private:
+    SystemCommand requestedCommand_ = SystemCommand::None;
 };
 
 }  // namespace pd
