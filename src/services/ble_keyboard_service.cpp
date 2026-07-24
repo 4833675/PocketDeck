@@ -67,8 +67,11 @@ public:
         owner_.handleConnect(server, param->connect.conn_id, param->connect.remote_bda);
     }
 
-    void onDisconnect(BLEServer*, esp_ble_gatts_cb_param_t*) override {
-        owner_.handleDisconnect();
+    void onDisconnect(BLEServer*, esp_ble_gatts_cb_param_t* param) override {
+        const uint8_t reason = param != nullptr
+                                   ? static_cast<uint8_t>(param->disconnect.reason)
+                                   : 0xFF;
+        owner_.handleDisconnect(reason);
     }
 
 private:
@@ -85,7 +88,9 @@ public:
     bool onConfirmPIN(uint32_t) override { return true; }
 
     void onAuthenticationComplete(esp_ble_auth_cmpl_t result) override {
-        owner_.handleAuthentication(result.success, result.fail_reason);
+        owner_.handleAuthentication(result.success, result.fail_reason,
+                                    static_cast<uint8_t>(result.auth_mode),
+                                    result.key_present);
     }
 
 private:
@@ -221,6 +226,7 @@ BleKeyboardSnapshot BleKeyboardService::snapshot() const {
     result.encrypted = encrypted_.load();
     result.bonded = bonded_.load();
     result.passkey = passkey_.load();
+    result.lastDisconnectReason = lastDisconnectReason_.load();
     result.error = error_.load();
 
     if (!result.enabled) {
@@ -263,29 +269,46 @@ void BleKeyboardService::handleConnect(BLEServer* server, uint16_t connectionId,
     connected_.store(true);
     encrypted_.store(false);
     error_.store(BleKeyboardError::None);
-    Serial.println("[ble] host connected, awaiting encryption");
+    Serial.println("[ble] host connected, requesting encryption");
+
+    // A bonded central does not have to initiate security immediately. Request
+    // it here so a reconnect restores the encrypted HID link before macOS
+    // decides the peripheral is not ready and drops the connection.
+    esp_bd_addr_t encryptionPeer{};
+    std::memcpy(encryptionPeer, peerAddress, sizeof(encryptionPeer));
+    const esp_err_t result =
+        esp_ble_set_encryption(encryptionPeer, ESP_BLE_SEC_ENCRYPT_MITM);
+    if (result != ESP_OK) {
+        Serial.printf("[ble] encryption request returned 0x%x\n",
+                      static_cast<unsigned>(result));
+    }
 }
 
-void BleKeyboardService::handleDisconnect() {
+void BleKeyboardService::handleDisconnect(uint8_t reason) {
     connected_.store(false);
     encrypted_.store(false);
+    lastDisconnectReason_.store(reason);
     reportPolicy_.setConnected(false);
-    Serial.println("[ble] host disconnected");
+    Serial.printf("[ble] host disconnected, reason=0x%02x\n", reason);
     if (enabled_.load()) startAdvertising();
 }
 
-void BleKeyboardService::handleAuthentication(bool success, uint8_t reason) {
+void BleKeyboardService::handleAuthentication(bool success, uint8_t reason, uint8_t authMode,
+                                              bool keyPresent) {
     if (!success) {
         encrypted_.store(false);
         error_.store(BleKeyboardError::AuthenticationFailed);
-        Serial.printf("[ble] authentication failed: 0x%02x\n", reason);
+        Serial.printf("[ble] authentication failed: reason=0x%02x auth=0x%02x\n", reason,
+                      authMode);
         return;
     }
 
+    const bool bondStored = hasStoredBond();
     encrypted_.store(true);
-    bonded_.store(true);
+    bonded_.store(bondStored);
     error_.store(BleKeyboardError::None);
-    Serial.println("[ble] encrypted and bonded");
+    Serial.printf("[ble] encrypted, bond=%d auth=0x%02x key=%d\n", bondStored ? 1 : 0,
+                  authMode, keyPresent ? 1 : 0);
 }
 
 void BleKeyboardService::startAdvertising() {

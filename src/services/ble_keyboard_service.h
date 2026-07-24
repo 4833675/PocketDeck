@@ -36,6 +36,7 @@ struct BleKeyboardSnapshot {
     bool encrypted = false;
     bool bonded = false;
     uint32_t passkey = 0;
+    uint8_t lastDisconnectReason = 0;
 };
 
 class BleKeyboardService {
@@ -62,8 +63,9 @@ private:
     friend class SecurityCallbacks;
 
     void handleConnect(BLEServer* server, uint16_t connectionId, const uint8_t* peerAddress);
-    void handleDisconnect();
-    void handleAuthentication(bool success, uint8_t reason);
+    void handleDisconnect(uint8_t reason);
+    void handleAuthentication(bool success, uint8_t reason, uint8_t authMode,
+                              bool keyPresent);
     void startAdvertising();
     void generatePasskey();
     bool hasStoredBond() const;
@@ -84,9 +86,9 @@ private:
     std::atomic<bool> bonded_{false};
     std::atomic<uint16_t> connectionId_{0};
     std::atomic<uint32_t> passkey_{0};
+    std::atomic<uint8_t> lastDisconnectReason_{0};
     std::atomic<BleKeyboardError> error_{BleKeyboardError::None};
     uint8_t lastBattery_ = 255;
 };
 
 }  // namespace pd
-

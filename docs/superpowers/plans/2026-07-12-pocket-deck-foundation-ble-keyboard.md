@@ -108,8 +108,8 @@ lib_deps =
 
 ```csv
 # Name,   Type, SubType, Offset,   Size,     Flags
-nvs,      data, nvs,     0x9000,   0x6000,
-phy_init, data, phy,     0xf000,   0x1000,
+nvs,      data, nvs,     0x9000,   0x5000,
+otadata,  data, ota,     0xe000,   0x2000,
 app0,     app,  factory, 0x10000,  0x300000,
 spiffs,   data, spiffs,  0x310000, 0x4F0000,
 ```

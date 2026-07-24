@@ -225,7 +225,7 @@ void System::trackBleState(const BleKeyboardSnapshot& snapshot) {
         diagnostics_.logf("BLE state: %s", bleStateName(snapshot.state));
     }
     if (lastBleSnapshotValid_ && lastBleSnapshot_.connected && !snapshot.connected) {
-        diagnostics_.log("BLE host disconnected");
+        diagnostics_.logf("BLE disconnected: 0x%02x", snapshot.lastDisconnectReason);
     }
     if ((!lastBleSnapshotValid_ || !lastBleSnapshot_.encrypted) && snapshot.encrypted) {
         diagnostics_.log("BLE authentication succeeded");
