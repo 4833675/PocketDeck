@@ -1,0 +1,20 @@
+# Pocket Deck Wi-Fi and Weather Hardware Smoke Test
+
+Target firmware: `0.3.0` on M5Stack Cardputer Adv.
+
+| ID | Test | Expected | Result | Notes |
+|---|---|---|---|---|
+| UI-01 | Observe status bar while BLE connected/disconnected/off | `BT` only; mint/amber/red respectively | Pending | |
+| WIFI-01 | Enable Wi-Fi in Settings | State leaves OFF without disturbing BLE | Pending | |
+| WIFI-02 | Scan networks | Nearby 2.4 GHz SSIDs appear, strongest first | Pending | |
+| WIFI-03 | Enter password | Characters stay masked and never type on the Mac | Pending | |
+| WIFI-04 | Connect | State becomes CONNECTED with plausible RSSI/IP | Pending | |
+| WIFI-05 | Network info | IP, gateway, DNS, status, and NTP UTC are visible | Pending | |
+| WIFI-06 | Restart | Saved network reconnects without entering password | Pending | |
+| WIFI-07 | Forget network | Saved profile is erased after confirmation | Pending | |
+| COEX-01 | Type during scan/connect | BLE HID remains connected and responsive | Pending | |
+| GPS-01 | Open GPS while Wi-Fi is connected | GPS stream and FIX continue | Pending | |
+| WX-01 | Open Weather with Wi-Fi but no GPS fix | Screen requests a fresh GPS fix | Pending | |
+| WX-02 | Open Weather with Wi-Fi and GPS fix | Current weather, high/low, sunrise/sunset appear | Pending | |
+| WX-03 | Press Enter in Weather | A manual refresh completes without freezing UI | Pending | |
+| RESET-01 | Factory reset | App settings, Wi-Fi profile, and BLE bond are erased | Pending | |

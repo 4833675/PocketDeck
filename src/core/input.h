@@ -9,6 +9,7 @@ namespace pd {
 
 enum class InputMode : uint8_t {
     System,
+    Text,
     Keyboard,
 };
 
@@ -20,11 +21,13 @@ enum class InputAction : uint8_t {
     Right,
     Confirm,
     Back,
+    Erase,
     Tab,
 };
 
 struct InputEvent {
     InputAction action = InputAction::None;
+    char character = '\0';
 };
 
 struct InputFrame {
@@ -39,7 +42,11 @@ struct InputFrame {
         if (action == InputAction::None || eventCount == kEventCapacity) return;
         events[eventCount++].action = action;
     }
+
+    void pushCharacter(char character) {
+        if (character == '\0' || eventCount == kEventCapacity) return;
+        events[eventCount++].character = character;
+    }
 };
 
 }  // namespace pd
-

@@ -4,16 +4,18 @@
 
 namespace pd {
 
-class KeyboardApp final : public App {
+class WeatherApp final : public App {
 public:
-    AppId id() const override { return AppId::Keyboard; }
-    const char* title() const override { return "KEYBOARD"; }
-    InputMode inputMode() const override { return InputMode::Keyboard; }
+    AppId id() const override { return AppId::Weather; }
+    const char* title() const override { return "WEATHER"; }
     void onEnter(SystemContext& context) override;
     void onExit(SystemContext& context) override;
     void onInput(const InputEvent& event, SystemContext& context) override;
     void update(uint32_t nowMs, SystemContext& context) override;
     void render(Display& display, const SystemContext& context) override;
+
+private:
+    bool refreshPending_ = true;
 };
 
 }  // namespace pd

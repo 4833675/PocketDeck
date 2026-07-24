@@ -15,14 +15,20 @@ void drawStatusBar(Display& display, const StatusBarData& data) {
     canvas.setTextDatum(middle_left);
     canvas.drawString(data.title, 6, theme::kStatusHeight / 2);
 
-    char status[32];
-    const char* bt = !data.bleEnabled ? "BT OFF" : (data.bleConnected ? "BT ON" : "BT --");
-    std::snprintf(status, sizeof(status), "%s  %u%%", bt,
+    char battery[8];
+    std::snprintf(battery, sizeof(battery), "%u%%",
                   static_cast<unsigned>(data.batteryPercent));
     canvas.setTextColor(theme::kMuted, theme::kPanel);
     canvas.setTextDatum(middle_right);
-    canvas.drawString(status, config::kScreenWidth - 6, theme::kStatusHeight / 2);
+    constexpr int16_t rightEdge = config::kScreenWidth - 6;
+    canvas.drawString(battery, rightEdge, theme::kStatusHeight / 2);
+
+    const uint16_t btColor = !data.bleEnabled
+                                 ? theme::kError
+                                 : (data.bleConnected ? theme::kPrimary : theme::kWarning);
+    canvas.setTextColor(btColor, theme::kPanel);
+    canvas.drawString("BT", rightEdge - canvas.textWidth(battery) - 7,
+                      theme::kStatusHeight / 2);
 }
 
 }  // namespace pd
-

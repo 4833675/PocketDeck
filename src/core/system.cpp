@@ -45,6 +45,8 @@ void System::begin() {
     context_.resetReason = resetReasonName(esp_reset_reason());
     context_.bleKeyboard = &bleKeyboard_;
     context_.gps = &gps_;
+    context_.wifi = &wifi_;
+    context_.weather = &weather_;
     context_.diagnostics = &diagnostics_;
     context_.settings = &settings_;
     diagnostics_.logf("Boot reset: %s", context_.resetReason);
@@ -68,12 +70,17 @@ void System::begin() {
     diagnostics_.logf("GPS UART: %s 115200 RX15 TX13", gpsReady ? "ready" : "failed");
     bleKeyboard_.setEnabled(settings_.bleEnabled);
     const bool bleReady = bleKeyboard_.begin(settings_.deviceName.data());
+    const bool wifiReady = wifi_.begin(settings_.wifiEnabled);
+    const bool weatherReady = weather_.begin();
     refreshContext(millis());
     trackBleState(bleKeyboard_.snapshot());
+    trackWifiState(wifi_.snapshot());
+    trackWeatherState(weather_.snapshot());
     current_ = &launcher_;
     current_->onEnter(context_);
-    diagnostics_.logf("System ready: display=%d BLE=%d GPS=%d", canvasReady ? 1 : 0,
-                      bleReady ? 1 : 0, gpsReady ? 1 : 0);
+    diagnostics_.logf("System ready: DISP=%d BLE=%d GPS=%d WIFI=%d WX=%d",
+                      canvasReady ? 1 : 0, bleReady ? 1 : 0, gpsReady ? 1 : 0,
+                      wifiReady ? 1 : 0, weatherReady ? 1 : 0);
     render();
 }
 
@@ -81,10 +88,13 @@ void System::update() {
     board_.update();
     const uint32_t nowMs = millis();
     gps_.update();
+    wifi_.update(nowMs);
     refreshContext(nowMs);
     bleKeyboard_.updateBattery(context_.batteryPercent);
     trackBleState(bleKeyboard_.snapshot());
     trackGpsState(gps_.snapshot());
+    trackWifiState(wifi_.snapshot());
+    trackWeatherState(weather_.snapshot());
 
     const G0Action g0 = g0Gesture_.update(board_.g0Down(), nowMs);
     if (g0 == G0Action::QuickSettings && !quickSettings_.active()) {
@@ -97,9 +107,8 @@ void System::update() {
         }
     }
 
-    const InputMode inputMode = !quickSettings_.active() && current_->id() == AppId::Keyboard
-                                    ? InputMode::Keyboard
-                                    : InputMode::System;
+    const InputMode inputMode = quickSettings_.active() ? InputMode::System
+                                                        : current_->inputMode();
     if (inputMode != InputMode::Keyboard || !context_.bleConnected) {
         context_.activeModifiers = 0;
     }
@@ -133,6 +142,7 @@ App* System::appForId(AppId id) {
     if (id == AppId::Launcher) return &launcher_;
     if (id == AppId::Keyboard) return &keyboard_;
     if (id == AppId::Gps) return &gpsApp_;
+    if (id == AppId::Weather) return &weatherApp_;
     if (id == AppId::Settings) return &settingsApp_;
     return nullptr;
 }
@@ -177,6 +187,27 @@ void System::handleQuickSettingsResult(const QuickSettingsResult& result) {
 void System::handleSystemCommand(SystemCommand command) {
     switch (command) {
         case SystemCommand::None: return;
+        case SystemCommand::ToggleWifi:
+            settings_.wifiEnabled = !settings_.wifiEnabled;
+            wifi_.setEnabled(settings_.wifiEnabled);
+            diagnostics_.log(settings_.wifiEnabled ? "WiFi enabled" : "WiFi disabled");
+            saveSettings();
+            return;
+        case SystemCommand::StartWifiScan:
+            diagnostics_.log(wifi_.startScan() ? "WiFi scan started" : "WiFi scan failed");
+            return;
+        case SystemCommand::ConnectWifi: {
+            WifiConnectRequest request;
+            if (!context_.takeWifiConnectRequest(request)) return;
+            const bool started = wifi_.connect(request.ssid.data(), request.password.data());
+            request.password.fill('\0');
+            diagnostics_.log(started ? "WiFi connection started" : "WiFi connection failed");
+            return;
+        }
+        case SystemCommand::ForgetWifi:
+            diagnostics_.log(wifi_.forgetNetwork() ? "WiFi network forgotten"
+                                                   : "WiFi forget failed");
+            return;
         case SystemCommand::ToggleBluetooth:
             settings_.bleEnabled = !settings_.bleEnabled;
             bleKeyboard_.setEnabled(settings_.bleEnabled);
@@ -200,8 +231,10 @@ void System::handleSystemCommand(SystemCommand command) {
         case SystemCommand::FactoryReset: {
             diagnostics_.log("Factory reset confirmed");
             const bool settingsCleared = settingsStore_.clear();
+            const bool wifiCleared = wifi_.forgetNetwork();
             const bool bondCleared = bleKeyboard_.forgetHost();
-            diagnostics_.logf("Factory clear: settings=%d bond=%d", settingsCleared ? 1 : 0,
+            diagnostics_.logf("Factory clear: settings=%d wifi=%d bond=%d",
+                              settingsCleared ? 1 : 0, wifiCleared ? 1 : 0,
                               bondCleared ? 1 : 0);
             delay(100);
             ESP.restart();
@@ -218,6 +251,9 @@ void System::refreshContext(uint32_t nowMs) {
     const BleKeyboardSnapshot ble = bleKeyboard_.snapshot();
     context_.bleEnabled = ble.enabled;
     context_.bleConnected = ble.state == BleKeyboardState::Connected;
+    const WifiSnapshot& wifi = wifi_.snapshot();
+    context_.wifiEnabled = wifi.enabled;
+    context_.wifiConnected = wifi.connected;
 }
 
 void System::trackBleState(const BleKeyboardSnapshot& snapshot) {
@@ -244,6 +280,32 @@ void System::trackGpsState(const GpsSnapshot& snapshot) {
         diagnostics_.logf("GPS state: %s", gpsStateLabel(state));
         lastGpsState_ = state;
         lastGpsStateValid_ = true;
+    }
+}
+
+void System::trackWifiState(const WifiSnapshot& snapshot) {
+    if (!lastWifiStateValid_ || snapshot.state != lastWifiState_) {
+        diagnostics_.logf("WiFi state: %s", wifiStateLabel(snapshot.state));
+        lastWifiState_ = snapshot.state;
+        lastWifiStateValid_ = true;
+    }
+    if (snapshot.ntpSynced && snapshot.utcEpoch > 0) {
+        static bool loggedTimeSync = false;
+        if (!loggedTimeSync) {
+            diagnostics_.log("NTP time synchronized");
+            loggedTimeSync = true;
+        }
+    }
+}
+
+void System::trackWeatherState(const WeatherSnapshot& snapshot) {
+    if (!lastWeatherStateValid_ || snapshot.state != lastWeatherState_) {
+        diagnostics_.logf("Weather state: %s", weatherStateLabel(snapshot.state));
+        if (snapshot.state == WeatherState::Error && snapshot.error[0] != '\0') {
+            diagnostics_.logf("Weather error: %.30s", snapshot.error.data());
+        }
+        lastWeatherState_ = snapshot.state;
+        lastWeatherStateValid_ = true;
     }
 }
 

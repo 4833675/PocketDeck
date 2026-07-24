@@ -4,21 +4,57 @@ namespace pd {
 
 void SettingsModel::reset() {
     page_ = SettingsPage::Categories;
-    category_ = SettingsCategory::Bluetooth;
+    category_ = SettingsCategory::Wifi;
     selectedRow_ = 0;
 }
 
-SettingsResult SettingsModel::handle(InputAction action) {
+SettingsResult SettingsModel::handle(InputAction action, uint8_t wifiNetworkCount) {
     if (page_ == SettingsPage::Categories) {
-        if (action == InputAction::Up || action == InputAction::Down) {
-            category_ = category_ == SettingsCategory::Bluetooth ? SettingsCategory::System
-                                                                 : SettingsCategory::Bluetooth;
+        if (action == InputAction::Up) {
+            moveCategory(-1);
+        } else if (action == InputAction::Down) {
+            moveCategory(1);
         } else if (action == InputAction::Confirm) {
-            page_ = category_ == SettingsCategory::Bluetooth ? SettingsPage::Bluetooth
-                                                              : SettingsPage::System;
+            if (category_ == SettingsCategory::Wifi) {
+                page_ = SettingsPage::Wifi;
+            } else if (category_ == SettingsCategory::Bluetooth) {
+                page_ = SettingsPage::Bluetooth;
+            } else {
+                page_ = SettingsPage::System;
+            }
             selectedRow_ = 0;
         } else if (action == InputAction::Back) {
             return {SettingsEffect::GoHome};
+        }
+        return {};
+    }
+
+    if (page_ == SettingsPage::WifiNetworks) {
+        if (action == InputAction::Back) {
+            page_ = SettingsPage::Wifi;
+            selectedRow_ = 1;
+        } else if (action == InputAction::Up && wifiNetworkCount > 0) {
+            moveRow(-1, wifiNetworkCount);
+        } else if (action == InputAction::Down && wifiNetworkCount > 0) {
+            moveRow(1, wifiNetworkCount);
+        } else if (action == InputAction::Confirm && wifiNetworkCount > 0) {
+            if (selectedRow_ >= wifiNetworkCount) selectedRow_ = 0;
+            return {SettingsEffect::SelectWifiNetwork};
+        } else if (action == InputAction::Tab) {
+            return {SettingsEffect::StartWifiScan};
+        }
+        return {};
+    }
+
+    if (page_ == SettingsPage::WifiPassword) {
+        if (action == InputAction::Back) cancelWifiPassword();
+        return {};
+    }
+
+    if (page_ == SettingsPage::WifiDiagnostics) {
+        if (action == InputAction::Back) {
+            page_ = SettingsPage::Wifi;
+            selectedRow_ = 2;
         }
         return {};
     }
@@ -28,15 +64,26 @@ SettingsResult SettingsModel::handle(InputAction action) {
         return {};
     }
 
-    if (page_ == SettingsPage::ConfirmForgetHost || page_ == SettingsPage::ConfirmRestart ||
+    if (page_ == SettingsPage::ConfirmForgetWifi ||
+        page_ == SettingsPage::ConfirmForgetHost || page_ == SettingsPage::ConfirmRestart ||
         page_ == SettingsPage::ConfirmFactoryReset) {
         if (action == InputAction::Back) {
-            page_ = page_ == SettingsPage::ConfirmForgetHost ? SettingsPage::Bluetooth
-                                                              : SettingsPage::System;
+            if (page_ == SettingsPage::ConfirmForgetWifi) {
+                page_ = SettingsPage::Wifi;
+            } else if (page_ == SettingsPage::ConfirmForgetHost) {
+                page_ = SettingsPage::Bluetooth;
+            } else {
+                page_ = SettingsPage::System;
+            }
             return {};
         }
         if (action != InputAction::Confirm) return {};
 
+        if (page_ == SettingsPage::ConfirmForgetWifi) {
+            page_ = SettingsPage::Wifi;
+            selectedRow_ = 3;
+            return {SettingsEffect::ForgetWifi};
+        }
         if (page_ == SettingsPage::ConfirmForgetHost) {
             page_ = SettingsPage::Bluetooth;
             return {SettingsEffect::ForgetHost};
@@ -55,15 +102,32 @@ SettingsResult SettingsModel::handle(InputAction action) {
         return {};
     }
 
+    uint8_t rowCount = 3;
+    if (page_ == SettingsPage::Wifi) rowCount = 4;
     if (action == InputAction::Up) {
-        moveRow(-1, 3);
+        moveRow(-1, rowCount);
         return {};
     }
     if (action == InputAction::Down) {
-        moveRow(1, 3);
+        moveRow(1, rowCount);
         return {};
     }
     if (action != InputAction::Confirm) return {};
+
+    if (page_ == SettingsPage::Wifi) {
+        if (selectedRow_ == 0) return {SettingsEffect::ToggleWifi};
+        if (selectedRow_ == 1) {
+            page_ = SettingsPage::WifiNetworks;
+            selectedRow_ = 0;
+            return {SettingsEffect::StartWifiScan};
+        }
+        if (selectedRow_ == 2) {
+            page_ = SettingsPage::WifiDiagnostics;
+            return {};
+        }
+        page_ = SettingsPage::ConfirmForgetWifi;
+        return {};
+    }
 
     if (page_ == SettingsPage::Bluetooth) {
         if (selectedRow_ == 0) return {SettingsEffect::ToggleBluetooth};
@@ -82,9 +146,29 @@ SettingsResult SettingsModel::handle(InputAction action) {
     return {};
 }
 
+void SettingsModel::openWifiPassword() {
+    page_ = SettingsPage::WifiPassword;
+}
+
+void SettingsModel::cancelWifiPassword() {
+    page_ = SettingsPage::WifiNetworks;
+}
+
+void SettingsModel::finishWifiConnection() {
+    page_ = SettingsPage::Wifi;
+    selectedRow_ = 1;
+}
+
 void SettingsModel::moveRow(int direction, uint8_t rowCount) {
+    if (rowCount == 0) return;
     const int next = static_cast<int>(selectedRow_) + direction + rowCount;
     selectedRow_ = static_cast<uint8_t>(next % rowCount);
+}
+
+void SettingsModel::moveCategory(int direction) {
+    constexpr int count = 3;
+    const int current = static_cast<int>(category_);
+    category_ = static_cast<SettingsCategory>((current + direction + count) % count);
 }
 
 }  // namespace pd

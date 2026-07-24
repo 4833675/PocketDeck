@@ -11,6 +11,9 @@
 #include "core/input_router.h"
 #include "core/mac_keymap.h"
 #include "core/system_settings.h"
+#include "core/text_keymap.h"
+#include "core/weather_data.h"
+#include "core/wifi_data.h"
 #include "services/diagnostics_service.h"
 #include "ui/quick_settings_model.h"
 
@@ -132,6 +135,34 @@ TEST_CASE(system_confirm_back_and_tab_are_local) {
     CHECK_EQ(frame.events[2].action, InputAction::Tab);
 }
 
+TEST_CASE(text_keymap_covers_wifi_password_characters) {
+    CHECK_EQ(TextKeymap::character(PhysicalKey::A, false), 'a');
+    CHECK_EQ(TextKeymap::character(PhysicalKey::A, true), 'A');
+    CHECK_EQ(TextKeymap::character(PhysicalKey::Num2, true), '@');
+    CHECK_EQ(TextKeymap::character(PhysicalKey::Slash, true), '?');
+    CHECK_EQ(TextKeymap::character(PhysicalKey::Space, false), ' ');
+    CHECK_EQ(TextKeymap::character(PhysicalKey::Shift, false), '\0');
+}
+
+TEST_CASE(text_mode_is_local_and_uses_explicit_edit_actions) {
+    InputRouter router;
+    auto frame = router.update(KeyState{PhysicalKey::A}, InputMode::Text, true);
+    CHECK_EQ(frame.eventCount, 1);
+    CHECK_EQ(frame.events[0].character, 'a');
+    CHECK(!frame.hasHidReport);
+
+    frame = router.update(KeyState{}, InputMode::Text, true);
+    frame = router.update(KeyState{PhysicalKey::Backspace}, InputMode::Text, true);
+    CHECK_EQ(frame.eventCount, 1);
+    CHECK_EQ(frame.events[0].action, InputAction::Erase);
+
+    frame = router.update(KeyState{}, InputMode::Text, true);
+    frame = router.update(KeyState{PhysicalKey::Fn, PhysicalKey::Backtick}, InputMode::Text,
+                          true);
+    CHECK_EQ(frame.eventCount, 1);
+    CHECK_EQ(frame.events[0].action, InputAction::Back);
+}
+
 TEST_CASE(keyboard_input_is_dropped_when_disconnected) {
     InputRouter router;
     auto frame = router.update(KeyState{PhysicalKey::A}, InputMode::Keyboard, false);
@@ -228,6 +259,8 @@ TEST_CASE(launcher_starts_on_keyboard_and_wraps) {
     model.handle(InputAction::Right);
     CHECK_EQ(model.selected(), AppId::Gps);
     model.handle(InputAction::Right);
+    CHECK_EQ(model.selected(), AppId::Weather);
+    model.handle(InputAction::Right);
     CHECK_EQ(model.selected(), AppId::Settings);
     model.handle(InputAction::Right);
     CHECK_EQ(model.selected(), AppId::Keyboard);
@@ -241,8 +274,20 @@ TEST_CASE(launcher_confirm_requests_selected_app) {
     model.handle(InputAction::Right);
     CHECK_EQ(model.handle(InputAction::Confirm), AppId::Gps);
     model.handle(InputAction::Right);
+    CHECK_EQ(model.handle(InputAction::Confirm), AppId::Weather);
+    model.handle(InputAction::Right);
     CHECK_EQ(model.handle(InputAction::Confirm), AppId::Settings);
     CHECK_EQ(model.handle(InputAction::Back), AppId::None);
+}
+
+TEST_CASE(wifi_and_weather_labels_cover_visible_states) {
+    CHECK_STR_EQ(wifiStateLabel(WifiState::Disabled), "OFF");
+    CHECK_STR_EQ(wifiStateLabel(WifiState::Scanning), "SCANNING");
+    CHECK_STR_EQ(wifiStateLabel(WifiState::Connected), "CONNECTED");
+    CHECK_STR_EQ(weatherStateLabel(WeatherState::Fetching), "FETCHING");
+    CHECK_STR_EQ(weatherCodeLabel(0), "CLEAR");
+    CHECK_STR_EQ(weatherCodeLabel(61), "RAIN");
+    CHECK_STR_EQ(weatherCodeLabel(95), "THUNDERSTORM");
 }
 
 TEST_CASE(gps_state_distinguishes_stream_search_fix_and_stale) {
@@ -372,6 +417,8 @@ TEST_CASE(quick_settings_close_reports_whether_persistence_is_needed) {
 TEST_CASE(settings_categories_open_and_back_out) {
     SettingsModel model;
     CHECK_EQ(model.page(), SettingsPage::Categories);
+    CHECK_EQ(model.category(), SettingsCategory::Wifi);
+    model.handle(InputAction::Down);
     CHECK_EQ(model.category(), SettingsCategory::Bluetooth);
     model.handle(InputAction::Down);
     CHECK_EQ(model.category(), SettingsCategory::System);
@@ -385,6 +432,7 @@ TEST_CASE(settings_categories_open_and_back_out) {
 
 TEST_CASE(settings_destructive_actions_require_confirmation) {
     SettingsModel model;
+    model.handle(InputAction::Down);
     model.handle(InputAction::Confirm);
     model.handle(InputAction::Down);
     model.handle(InputAction::Down);
@@ -404,6 +452,7 @@ TEST_CASE(settings_destructive_actions_require_confirmation) {
 
 TEST_CASE(settings_bluetooth_controls_emit_explicit_effects) {
     SettingsModel model;
+    model.handle(InputAction::Down);
     model.handle(InputAction::Confirm);
     auto result = model.handle(InputAction::Confirm);
     CHECK_EQ(result.effect, SettingsEffect::ToggleBluetooth);
@@ -412,8 +461,39 @@ TEST_CASE(settings_bluetooth_controls_emit_explicit_effects) {
     CHECK_EQ(result.effect, SettingsEffect::DisconnectBluetooth);
 }
 
+TEST_CASE(settings_wifi_scan_selection_and_forget_are_explicit) {
+    SettingsModel model;
+    model.handle(InputAction::Confirm);
+    auto result = model.handle(InputAction::Confirm);
+    CHECK_EQ(result.effect, SettingsEffect::ToggleWifi);
+
+    model.handle(InputAction::Down);
+    result = model.handle(InputAction::Confirm);
+    CHECK_EQ(result.effect, SettingsEffect::StartWifiScan);
+    CHECK_EQ(model.page(), SettingsPage::WifiNetworks);
+
+    model.handle(InputAction::Down, 3);
+    CHECK_EQ(model.selectedRow(), 1);
+    result = model.handle(InputAction::Confirm, 3);
+    CHECK_EQ(result.effect, SettingsEffect::SelectWifiNetwork);
+    model.openWifiPassword();
+    CHECK_EQ(model.page(), SettingsPage::WifiPassword);
+    model.cancelWifiPassword();
+    CHECK_EQ(model.page(), SettingsPage::WifiNetworks);
+    model.handle(InputAction::Back, 3);
+    CHECK_EQ(model.page(), SettingsPage::Wifi);
+
+    model.handle(InputAction::Down);
+    model.handle(InputAction::Down);
+    result = model.handle(InputAction::Confirm);
+    CHECK_EQ(model.page(), SettingsPage::ConfirmForgetWifi);
+    result = model.handle(InputAction::Confirm);
+    CHECK_EQ(result.effect, SettingsEffect::ForgetWifi);
+}
+
 TEST_CASE(settings_system_actions_and_diagnostics_are_reachable) {
     SettingsModel model;
+    model.handle(InputAction::Down);
     model.handle(InputAction::Down);
     model.handle(InputAction::Confirm);
     auto result = model.handle(InputAction::Confirm);
@@ -429,6 +509,7 @@ TEST_CASE(settings_system_actions_and_diagnostics_are_reachable) {
 
 TEST_CASE(settings_factory_reset_requires_its_own_confirmation) {
     SettingsModel model;
+    model.handle(InputAction::Down);
     model.handle(InputAction::Down);
     model.handle(InputAction::Confirm);
     model.handle(InputAction::Down);
@@ -450,6 +531,8 @@ int main() {
     more_than_six_keys_reports_rollover();
     system_fn_navigation_is_local_and_edge_triggered();
     system_confirm_back_and_tab_are_local();
+    text_keymap_covers_wifi_password_characters();
+    text_mode_is_local_and_uses_explicit_edit_actions();
     keyboard_input_is_dropped_when_disconnected();
     keyboard_input_becomes_hid_when_connected();
     enter_used_to_open_keyboard_does_not_leak_to_mac();
@@ -461,6 +544,7 @@ int main() {
     settings_sanitizer_clamps_and_repairs();
     launcher_starts_on_keyboard_and_wraps();
     launcher_confirm_requests_selected_app();
+    wifi_and_weather_labels_cover_visible_states();
     gps_state_distinguishes_stream_search_fix_and_stale();
     gps_compass_points_cover_cardinal_and_intercardinal_directions();
     gps_fix_quality_and_mode_have_readable_labels();
@@ -474,6 +558,7 @@ int main() {
     settings_categories_open_and_back_out();
     settings_destructive_actions_require_confirmation();
     settings_bluetooth_controls_emit_explicit_effects();
+    settings_wifi_scan_selection_and_forget_are_explicit();
     settings_system_actions_and_diagnostics_are_reachable();
     settings_factory_reset_requires_its_own_confirmation();
     return pd_test::finish();

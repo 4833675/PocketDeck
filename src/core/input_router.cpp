@@ -1,6 +1,7 @@
 #include "core/input_router.h"
 
 #include "core/mac_keymap.h"
+#include "core/text_keymap.h"
 
 namespace pd {
 
@@ -69,10 +70,23 @@ InputFrame InputRouter::update(const KeyState& state, InputMode mode, bool bleCo
     }
 
     const bool fnHeld = state.contains(PhysicalKey::Fn);
+    const bool shiftHeld = state.contains(PhysicalKey::Shift);
     for (uint8_t i = 0; i < state.count; ++i) {
         const PhysicalKey key = state.keys[i];
         if (previous_.contains(key)) continue;
-        frame.push(systemAction(key, fnHeld));
+        if (mode == InputMode::Text) {
+            if (key == PhysicalKey::Enter) {
+                frame.push(InputAction::Confirm);
+            } else if (key == PhysicalKey::Backspace) {
+                frame.push(InputAction::Erase);
+            } else if (fnHeld && key == PhysicalKey::Backtick) {
+                frame.push(InputAction::Back);
+            } else {
+                frame.pushCharacter(TextKeymap::character(key, shiftHeld));
+            }
+        } else {
+            frame.push(systemAction(key, fnHeld));
+        }
     }
     previous_ = state;
     return frame;
@@ -87,4 +101,3 @@ void InputRouter::reset() {
 }
 
 }  // namespace pd
-

@@ -5,10 +5,11 @@ Cardputer Adv. It is a new firmware project: it does not depend on Claude
 Desktop, the Hardware Buddy protocol, or the source code of the earlier Claude
 Buddy firmware.
 
-The current `0.2.0` firmware contains a Graphite Mint system shell, launcher,
+The current `0.3.0` firmware contains a Graphite Mint system shell, launcher,
 secure single-host Bluetooth LE keyboard for macOS, a live GNSS/GPS app for the
-Cap LoRa-1262, Bluetooth/System settings, Quick Settings, persistent
-preferences, and on-device diagnostics.
+Cap LoRa-1262, Wi-Fi scanning and connection, NTP time, GPS-local weather,
+Bluetooth/Wi-Fi/System settings, Quick Settings, persistent preferences, and
+on-device diagnostics.
 
 Hardware BLE behavior is not considered verified until the checklist in
 [`docs/validation/ble-keyboard-smoke-test.md`](docs/validation/ble-keyboard-smoke-test.md)
@@ -21,8 +22,8 @@ has been completed on a real Cardputer Adv.
 - One 3 MB application partition plus LittleFS; no OTA slot and no PSRAM.
 - One stable BLE HID identity named `Pocket Deck` and one bonded Mac.
 - English UI with built-in fonts; no filesystem assets are currently required.
-- No Wi-Fi UI, microphone, dictation, Claude integration, LoRa radio, or IR in
-  this phase. Those are deliberately absent rather than placeholder menu items.
+- No microphone, dictation, Claude integration, LoRa radio, IR, SSH terminal,
+  MQTT, or Home Assistant integration yet.
 - The old project at `/Users/kx/M5Stack/claude-desktop-buddy-cardputer` is
   independent and remains available to build or flash separately.
 
@@ -88,8 +89,13 @@ layer:
 | G0 hold for 600 ms | Open Quick Settings |
 
 Home is a horizontal card launcher. Use Fn+`,` and Fn+`/` to select Keyboard,
-GPS, or Settings, then Enter to open it. Every boot returns to Home with Keyboard
-selected; booting never makes ordinary keys active as HID input by itself.
+GPS, Weather, or Settings, then Enter to open it. Every boot returns to Home with
+Keyboard selected; booting never makes ordinary keys active as HID input by
+itself.
+
+The right side of the status bar shows only `BT` plus battery percentage. `BT`
+is mint while connected, amber while enabled but disconnected, and red while
+Bluetooth is deliberately off.
 
 Quick Settings is an overlay over the current app:
 
@@ -184,7 +190,40 @@ The Cap uses a built-in ceramic GNSS antenna; first position acquisition should
 be tested outdoors with a broad view of the sky. A cold start can take minutes
 in real conditions even though valid NMEA data appears immediately.
 
-## Bluetooth and System settings
+## Wi-Fi, NTP, and network diagnostics
+
+Open Settings > Wi-Fi. The Wi-Fi page provides an on/off switch, asynchronous
+network scan, network diagnostics, and a confirmed forget action. Select a scan
+result and enter its password directly on the Cardputer. Password input remains
+local: it is masked on screen, never routed through BLE HID, and never written
+to serial or the diagnostic ring. Use Backspace to erase a character and
+Fn+Backtick to cancel entry.
+
+The ESP32 Wi-Fi stack stores one selected station network in NVS. When Wi-Fi is
+enabled after restart, Pocket Deck reconnects using that saved configuration.
+Disabling Wi-Fi preserves it; Forget network and Factory reset erase it.
+
+After connection Pocket Deck synchronizes UTC through NTP. Settings > Wi-Fi >
+Network info displays connection state, SDK status, SSID, RSSI, local IP,
+gateway, DNS, and NTP UTC time. Scanning and connecting are non-blocking so the
+BLE keyboard and UI continue running while Wi-Fi changes state.
+
+## Weather
+
+Weather uses the most recent valid GPS coordinates and the connected Wi-Fi
+network. It retrieves current temperature, apparent temperature, humidity,
+wind, WMO weather condition, today's high/low, and local sunrise/sunset from
+[Open-Meteo](https://open-meteo.com/en/docs). No API key is required. Press
+Enter to refresh manually; successful data refreshes automatically after 15
+minutes or after moving roughly 0.05 degrees.
+
+The HTTPS request runs in a separate FreeRTOS task so a slow forecast endpoint
+does not block keyboard input or rendering. This first implementation accepts
+the endpoint certificate without pinning because it transmits only public
+coordinates and receives public forecast data; it sends no Wi-Fi password,
+typed content, token, or other secret.
+
+## Bluetooth, Wi-Fi, and System settings
 
 Open Settings from Home, select a category with Up/Down, and press Enter.
 
@@ -202,7 +241,8 @@ System provides:
   five newest entries from a fixed 12-entry diagnostic ring.
 - `Restart`, protected by a confirmation page.
 - `Factory reset`, protected by a separate confirmation page. It clears the
-  `pocketdeck` application settings namespace and the BLE bond, then restarts.
+  `pocketdeck` application settings namespace, saved Wi-Fi network, and BLE
+  bond, then restarts.
 
 Settings are stored as a versioned, checksummed Preferences/NVS record. BLE
 bond keys remain owned by the BLE stack and are never copied into application
@@ -226,6 +266,12 @@ settings. Missing or invalid settings safely restore defaults.
   115200-baud configuration.
 - **GPS says `SEARCHING`:** the serial/NMEA path is working; move outdoors with
   the ceramic antenna facing open sky and allow time for a cold start.
+- **Wi-Fi scan is empty:** confirm Wi-Fi is ON, press Tab to scan again, and
+  remember the ESP32-S3 supports 2.4 GHz networks rather than 5 GHz-only SSIDs.
+- **Weather waits for GPS:** Weather deliberately requires a fresh GPS fix; open
+  GPS outdoors before requesting a location-based forecast.
+- **Weather reports an HTTP error:** inspect Settings > Wi-Fi > Network info,
+  confirm NTP/IP are available, then press Enter in Weather to retry.
 - **Need a clean compile:** run `pio run -e cardputer-adv -t clean`, then build
   again. A full flash erase is not part of the normal update path.
 
@@ -234,9 +280,9 @@ settings. Missing or invalid settings safely restore defaults.
 ```text
 src/core/       system loop, app lifecycle, input routing, settings model
 src/drivers/    Cardputer board and display adapters
-src/services/   BLE HID, GPS UART/parser, Preferences, diagnostics
+src/services/   BLE HID, Wi-Fi/NTP, weather HTTPS, GPS, Preferences, diagnostics
 src/ui/         Graphite Mint widgets and Quick Settings
-src/apps/       launcher, Keyboard, GPS, and Settings
+src/apps/       launcher, Keyboard, GPS, Weather, and Settings
 test/native/    hardware-independent C++ tests
 ```
 

@@ -7,6 +7,7 @@
 #include "drivers/display.h"
 #include "pocket_deck_config.h"
 #include "services/gps_service.h"
+#include "services/weather_service.h"
 #include "ui/status_bar.h"
 #include "ui/theme.h"
 
@@ -17,6 +18,7 @@ const char* appTitle(AppId id) {
     switch (id) {
         case AppId::Keyboard: return "KEYBOARD";
         case AppId::Gps: return "GPS";
+        case AppId::Weather: return "WEATHER";
         case AppId::Settings: return "SETTINGS";
         default: return "APP";
     }
@@ -26,6 +28,7 @@ const char* appIcon(AppId id) {
     switch (id) {
         case AppId::Keyboard: return ">_";
         case AppId::Gps: return "G+";
+        case AppId::Weather: return "WX";
         case AppId::Settings: return "::";
         default: return "--";
     }
@@ -75,6 +78,16 @@ void LauncherApp::render(Display& display, const SystemContext& context) {
                           static_cast<unsigned long>(gps.satellites));
         } else {
             std::snprintf(subtitle, sizeof(subtitle), "%s", gpsStateLabel(classifyGpsState(gps)));
+        }
+    } else if (model_.selected() == AppId::Weather) {
+        const WeatherSnapshot weather = context.weather != nullptr
+                                            ? context.weather->snapshot()
+                                            : WeatherSnapshot{};
+        if (weather.valid && weather.state == WeatherState::Ready) {
+            std::snprintf(subtitle, sizeof(subtitle), "%.1f C / %s", weather.temperatureC,
+                          weatherCodeLabel(weather.weatherCode));
+        } else {
+            std::snprintf(subtitle, sizeof(subtitle), "%s", weatherStateLabel(weather.state));
         }
     } else {
         std::snprintf(subtitle, sizeof(subtitle), "System controls");
