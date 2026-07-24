@@ -1,17 +1,17 @@
 # Pocket Deck BLE Keyboard Hardware Smoke Test
 
-This checklist is the hardware boundary for Pocket Deck `0.1.0`. Automated
-tests and a successful firmware link do not mark any hardware row as passed.
-Fill in every result after flashing a real M5Stack Cardputer Adv.
+This is a reusable hardware-validation template for Pocket Deck `0.3.0` or
+later. Automated tests and a successful firmware link do not mark a hardware
+row as passed. Fill in every result after flashing a real M5Stack Cardputer Adv.
 
 ## Test record
 
 | Field | Value |
 |---|---|
 | Date / time | Pending |
-| Tester | KEXIN |
-| Firmware commit | `a0f190b` (implementation; documentation follows) |
-| Firmware version | 0.1.0 |
+| Tester | Pending |
+| Firmware commit | Pending |
+| Firmware version | 0.3.0 or later |
 | Cardputer model | M5Stack Cardputer Adv |
 | Mac model | Pending |
 | macOS version | Pending |
@@ -25,8 +25,8 @@ the six-digit pairing code or typed test content in this file.
 
 | Check | Command | Expected | Result | Notes |
 |---|---|---|---|---|
-| Native tests | `scripts/test-native.sh` | All checks pass | PASS | 171 checks on 2026-07-12 |
-| Firmware build | `pio run -e cardputer-adv` | Exit 0; RAM/flash below limits | PASS | RAM 49,124 / 327,680 bytes; flash 1,144,397 / 3,145,728 bytes |
+| Native tests | `scripts/test-native.sh` | All checks pass | Pending | |
+| Firmware build | `pio run -e cardputer-adv` | Exit 0; RAM/flash below limits | Pending | |
 | Firmware upload | `pio run -e cardputer-adv -t upload` | Upload and reset succeed | Pending | |
 | Serial / diagnostics | `pio device monitor -e cardputer-adv` | No reboot loop or fatal service failure | Pending | |
 
@@ -35,7 +35,7 @@ the six-digit pairing code or typed test content in this file.
 | ID | Test | Procedure | Expected | Result | Notes |
 |---|---|---|---|---|---|
 | SYS-01 | Boot Home | Power on or reset | Home appears; Keyboard card is selected; Keyboard app is not yet open | Pending | |
-| SYS-02 | Launcher | Use Fn+`,` and Fn+`/`, then Enter | Selection wraps between Keyboard and Settings; selected app opens | Pending | |
+| SYS-02 | Launcher | Use Fn+`,` and Fn+`/`, then Enter | Selection wraps through Keyboard, GPS, Weather, and Settings; selected app opens | Pending | |
 | SYS-03 | G0 short | From Keyboard, Settings, a confirmation page, and Home, tap G0 | Returns directly to Home without also opening Quick Settings | Pending | |
 | SYS-04 | G0 long | Hold G0 for at least 600 ms in Home, Keyboard, and Settings | Quick Settings opens once; release does not trigger Home | Pending | |
 | SYS-05 | Quick controls | Adjust brightness/volume, toggle BLE, close with Backspace | Hardware changes immediately; changed values survive restart | Pending | |
@@ -83,19 +83,18 @@ Do not use a shell, password field, chat, or document containing important data.
 | REC-04 | Forget confirmation cancel | Select Forget host, then Backspace | Bond remains and reconnect still works | Pending | |
 | REC-05 | Forget and re-pair | Select Forget host, confirm with Enter, then pair again | Old bond is removed, a new code appears, and the Mac can pair without flash erase | Pending | |
 | REC-06 | Restart confirmation | Select Restart, cancel once, then confirm | Cancel has no effect; confirm performs a clean software restart | Pending | |
-| REC-07 | Factory reset | Change Quick Settings, ensure a bond exists, confirm Factory reset | App settings and BLE bond clear; restart returns defaults and requires fresh pairing | Pending | |
+| REC-07 | Factory reset | Change Quick Settings, save Wi-Fi, ensure a bond exists, confirm Factory reset | App settings, Wi-Fi profile, and BLE bond clear; restart returns defaults and requires fresh pairing | Pending | |
 | REC-08 | Post-reset identity | Compare the advertised device before and after Factory reset | Name/base device identity remains `Pocket Deck`; only settings/bond state reset | Pending | |
 
 ## Result summary
 
 | Category | Status | Blocking issue / follow-up |
 |---|---|---|
-| Automated preflight | PARTIAL | Native tests/build pass; upload and serial remain pending |
+| Automated preflight | Pending | |
 | System shell | Pending | |
 | Pairing and reconnect | Pending | |
 | Keymap | Pending | |
 | Recovery and reset | Pending | |
 
-Do not begin the Wi-Fi/full-Settings implementation cycle until failures are
-recorded and triaged. A failed row should include the smallest reproducible
-sequence plus the newest relevant on-device diagnostic lines.
+A failed row should include the smallest reproducible sequence plus the newest
+relevant on-device diagnostic lines.

@@ -1,7 +1,9 @@
 # Pocket Deck GPS Hardware Smoke Test
 
-Target firmware: `0.2.0`  
-Hardware: M5Stack Cardputer Adv + Cap LoRa-1262  
+Target firmware: `0.3.0` or later
+
+Hardware: M5Stack Cardputer Adv + Cap LoRa-1262
+
 Result values: `PASS`, `FAIL`, or `BLOCKED`
 
 Do not treat a successful build as proof of satellite reception. Test the fix

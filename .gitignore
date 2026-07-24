@@ -2,5 +2,13 @@
 .pio/
 .build/
 .DS_Store
+.idea/
+.vscode/
+__pycache__/
+compile_commands.json
+*.log
+*.map
+*.hex
+*.uf2
 *.bin
 *.elf

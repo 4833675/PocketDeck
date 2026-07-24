@@ -1,9 +1,12 @@
 # Pocket Deck
 
-Pocket Deck is a standalone, keyboard-first pocket system for the M5Stack
-Cardputer Adv. It is a new firmware project: it does not depend on Claude
-Desktop, the Hardware Buddy protocol, or the source code of the earlier Claude
-Buddy firmware.
+Pocket Deck is standalone, keyboard-first firmware built specifically for the
+**M5Stack Cardputer Adv** (Stamp-S3A, 240x135 display, 8 MB flash). It is not
+intended for the original Cardputer model.
+
+The Bluetooth keyboard and system shell run on the Cardputer Adv alone. The GPS
+dashboard and GPS-local weather additionally require the optional **M5Stack Cap
+LoRa-1262**, which contains the supported GNSS receiver.
 
 The current `0.3.0` firmware contains a Graphite Mint system shell, launcher,
 secure single-host Bluetooth LE keyboard for macOS, a live GNSS/GPS app for the
@@ -11,33 +14,28 @@ Cap LoRa-1262, Wi-Fi scanning and connection, NTP time, GPS-local weather,
 Bluetooth/Wi-Fi/System settings, Quick Settings, persistent preferences, and
 on-device diagnostics.
 
-Hardware BLE behavior is not considered verified until the checklist in
-[`docs/validation/ble-keyboard-smoke-test.md`](docs/validation/ble-keyboard-smoke-test.md)
-has been completed on a real Cardputer Adv.
+Hardware validation procedures are kept under [`docs/validation/`](docs/validation/).
 
 ## Target and boundaries
 
 - M5Stack Cardputer Adv / Stamp-S3A, 8 MB flash, 240×135 display.
+- Optional M5Stack Cap LoRa-1262 for GPS and location-based weather.
 - PlatformIO + Arduino-ESP32, M5Cardputer 1.1.1, and M5Unified 0.2.17.
 - One 3 MB application partition plus LittleFS; no OTA slot and no PSRAM.
 - One stable BLE HID identity named `Pocket Deck` and one bonded Mac.
 - English UI with built-in fonts; no filesystem assets are currently required.
 - No microphone, dictation, Claude integration, LoRa radio, IR, SSH terminal,
   MQTT, or Home Assistant integration yet.
-- The old project at `/Users/kx/M5Stack/claude-desktop-buddy-cardputer` is
-  independent and remains available to build or flash separately.
 
 ## Prerequisites
 
-Install PlatformIO and connect the Cardputer Adv over USB. All commands below
-run from the Pocket Deck repository root:
+Install PlatformIO, clone the repository, and connect the Cardputer Adv over
+USB:
 
 ```bash
-cd /Users/kx/M5Stack/pocket-deck
+git clone https://github.com/4833675/PocketDeck.git
+cd PocketDeck
 ```
-
-If development is still taking place in an isolated worktree, run the same
-commands from that worktree root instead.
 
 ## Test, build, flash, and monitor
 
@@ -286,5 +284,5 @@ src/apps/       launcher, Keyboard, GPS, Weather, and Settings
 test/native/    hardware-independent C++ tests
 ```
 
-The approved design and implementation plan are retained under
-`docs/superpowers/` for future work.
+Architecture decisions and repeatable hardware validation checklists are kept
+under `docs/`.
