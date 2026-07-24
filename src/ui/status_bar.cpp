@@ -2,11 +2,34 @@
 
 #include <cstdio>
 
+#include "core/system_context.h"
 #include "drivers/display.h"
 #include "pocket_deck_config.h"
 #include "ui/theme.h"
 
 namespace pd {
+namespace {
+
+uint16_t connectionColor(bool enabled, bool connected) {
+    if (!enabled) return theme::kError;
+    return connected ? theme::kPrimary : theme::kWarning;
+}
+
+}  // namespace
+
+StatusBarData makeStatusBarData(const char* title, const SystemContext& context) {
+    StatusBarData data;
+    data.title = title;
+    data.bleEnabled = context.bleEnabled;
+    data.bleConnected = context.bleConnected;
+    data.wifiEnabled = context.wifiEnabled;
+    data.wifiConnected = context.wifiConnected;
+    data.clockValid = context.clockValid;
+    data.clockHour = context.clockHour;
+    data.clockMinute = context.clockMinute;
+    data.batteryPercent = context.batteryPercent;
+    return data;
+}
 
 void drawStatusBar(Display& display, const StatusBarData& data) {
     auto& canvas = display.canvas();
@@ -23,12 +46,22 @@ void drawStatusBar(Display& display, const StatusBarData& data) {
     constexpr int16_t rightEdge = config::kScreenWidth - 6;
     canvas.drawString(battery, rightEdge, theme::kStatusHeight / 2);
 
-    const uint16_t btColor = !data.bleEnabled
-                                 ? theme::kError
-                                 : (data.bleConnected ? theme::kPrimary : theme::kWarning);
-    canvas.setTextColor(btColor, theme::kPanel);
-    canvas.drawString("BT", rightEdge - canvas.textWidth(battery) - 7,
-                      theme::kStatusHeight / 2);
+    int16_t indicatorRight = rightEdge - canvas.textWidth(battery) - 7;
+    canvas.setTextColor(connectionColor(data.bleEnabled, data.bleConnected), theme::kPanel);
+    canvas.drawString("BT", indicatorRight, theme::kStatusHeight / 2);
+    indicatorRight -= canvas.textWidth("BT") + 7;
+    canvas.setTextColor(connectionColor(data.wifiEnabled, data.wifiConnected), theme::kPanel);
+    canvas.drawString("WiFi", indicatorRight, theme::kStatusHeight / 2);
+
+    char clock[6] = "--:--";
+    if (data.clockValid) {
+        std::snprintf(clock, sizeof(clock), "%02u:%02u",
+                      static_cast<unsigned>(data.clockHour),
+                      static_cast<unsigned>(data.clockMinute));
+    }
+    canvas.setTextDatum(middle_center);
+    canvas.setTextColor(data.clockValid ? theme::kText : theme::kMuted, theme::kPanel);
+    canvas.drawString(clock, config::kScreenWidth / 2, theme::kStatusHeight / 2);
 }
 
 }  // namespace pd

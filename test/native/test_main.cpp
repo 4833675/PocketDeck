@@ -6,6 +6,7 @@
 #include "apps/launcher/launcher_model.h"
 #include "apps/settings/settings_model.h"
 #include "core/ble_keyboard_policy.h"
+#include "core/clock_data.h"
 #include "core/g0_gesture.h"
 #include "core/gps_data.h"
 #include "core/input_router.h"
@@ -290,6 +291,54 @@ TEST_CASE(wifi_and_weather_labels_cover_visible_states) {
     CHECK_STR_EQ(weatherCodeLabel(95), "THUNDERSTORM");
 }
 
+TEST_CASE(local_clock_rejects_unsynced_time_and_applies_utc_offset) {
+    constexpr int64_t midnightUtc = 1704067200;  // 2024-01-01 00:00 UTC
+    CHECK(!clockFromUtcEpoch(0, 8 * 60 * 60).valid);
+
+    const ClockDisplay morning = clockFromUtcEpoch(midnightUtc, 8 * 60 * 60);
+    CHECK(morning.valid);
+    CHECK_EQ(morning.hour, 8);
+    CHECK_EQ(morning.minute, 0);
+
+    const ClockDisplay nextDay =
+        clockFromUtcEpoch(midnightUtc + 16 * 60 * 60 + 30 * 60, 8 * 60 * 60);
+    CHECK_EQ(nextDay.hour, 0);
+    CHECK_EQ(nextDay.minute, 30);
+}
+
+TEST_CASE(weather_display_keeps_successful_data_when_inputs_disappear) {
+    WeatherSnapshot weather;
+    CHECK_EQ(classifyWeatherDisplay(weather, false, false, false),
+             WeatherDisplayState::WifiOff);
+    CHECK_EQ(classifyWeatherDisplay(weather, true, true, false),
+             WeatherDisplayState::WaitingGps);
+
+    weather.state = WeatherState::Fetching;
+    CHECK_EQ(classifyWeatherDisplay(weather, true, true, true),
+             WeatherDisplayState::Fetching);
+
+    weather.valid = true;
+    weather.state = WeatherState::Ready;
+    CHECK_EQ(classifyWeatherDisplay(weather, true, true, true),
+             WeatherDisplayState::Live);
+    const WeatherDisplayState noGps =
+        classifyWeatherDisplay(weather, true, true, false);
+    CHECK_EQ(noGps, WeatherDisplayState::CachedNoGps);
+    CHECK(weatherDisplayShowsData(noGps));
+    const WeatherDisplayState offline =
+        classifyWeatherDisplay(weather, false, false, false);
+    CHECK_EQ(offline, WeatherDisplayState::CachedOffline);
+    CHECK(weatherDisplayShowsData(offline));
+
+    weather.state = WeatherState::Fetching;
+    CHECK_EQ(classifyWeatherDisplay(weather, true, true, true),
+             WeatherDisplayState::Updating);
+    weather.state = WeatherState::Error;
+    CHECK_EQ(classifyWeatherDisplay(weather, true, true, true),
+             WeatherDisplayState::CachedError);
+    CHECK(weatherDisplayShowsData(WeatherDisplayState::CachedError));
+}
+
 TEST_CASE(gps_state_distinguishes_stream_search_fix_and_stale) {
     GpsSnapshot snapshot;
     CHECK_EQ(classifyGpsState(snapshot), GpsState::NoData);
@@ -545,6 +594,8 @@ int main() {
     launcher_starts_on_keyboard_and_wraps();
     launcher_confirm_requests_selected_app();
     wifi_and_weather_labels_cover_visible_states();
+    local_clock_rejects_unsynced_time_and_applies_utc_offset();
+    weather_display_keeps_successful_data_when_inputs_disappear();
     gps_state_distinguishes_stream_search_fix_and_stale();
     gps_compass_points_cover_cardinal_and_intercardinal_directions();
     gps_fix_quality_and_mode_have_readable_labels();

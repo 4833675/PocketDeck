@@ -186,8 +186,7 @@ void GpsApp::render(Display& display, const SystemContext& context) {
     const GpsSnapshot gps = context.gps != nullptr ? context.gps->snapshot() : GpsSnapshot{};
     char title[10];
     std::snprintf(title, sizeof(title), "GPS %u/3", static_cast<unsigned>(page_ + 1));
-    drawStatusBar(display, {title, context.bleEnabled, context.bleConnected,
-                            context.batteryPercent});
+    drawStatusBar(display, makeStatusBarData(title, context));
     auto& canvas = display.canvas();
     if (page_ == 0) {
         drawPosition(canvas, gps);

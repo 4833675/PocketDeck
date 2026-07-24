@@ -439,7 +439,7 @@ void SettingsApp::render(Display& display, const SystemContext& context) {
                                         : BleKeyboardSnapshot{};
     const WifiSnapshot wifi = context.wifi != nullptr ? context.wifi->snapshot()
                                                        : WifiSnapshot{};
-    drawStatusBar(display, {"SETTINGS", ble.enabled, ble.connected, context.batteryPercent});
+    drawStatusBar(display, makeStatusBarData("SETTINGS", context));
     auto& canvas = display.canvas();
     switch (model_.page()) {
         case SettingsPage::Categories: drawCategories(canvas, model_, context, wifi, ble); break;

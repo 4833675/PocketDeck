@@ -8,7 +8,7 @@ The Bluetooth keyboard and system shell run on the Cardputer Adv alone. The GPS
 dashboard and GPS-local weather additionally require the optional **M5Stack Cap
 LoRa-1262**, which contains the supported GNSS receiver.
 
-The current `0.3.0` firmware contains a Graphite Mint system shell, launcher,
+The current `0.3.1` firmware contains a Graphite Mint system shell, launcher,
 secure single-host Bluetooth LE keyboard for macOS, a live GNSS/GPS app for the
 Cap LoRa-1262, Wi-Fi scanning and connection, NTP time, GPS-local weather,
 Bluetooth/Wi-Fi/System settings, Quick Settings, persistent preferences, and
@@ -91,9 +91,10 @@ GPS, Weather, or Settings, then Enter to open it. Every boot returns to Home wit
 Keyboard selected; booting never makes ordinary keys active as HID input by
 itself.
 
-The right side of the status bar shows only `BT` plus battery percentage. `BT`
-is mint while connected, amber while enabled but disconnected, and red while
-Bluetooth is deliberately off.
+The status bar shows a 24-hour clock in the center and `WiFi`, `BT`, and battery
+percentage on the right. Each radio label is mint while connected, amber while
+enabled but disconnected, and red while deliberately off. The clock shows
+`--:--` until NTP has supplied a plausible time.
 
 Quick Settings is an overlay over the current app:
 
@@ -203,8 +204,10 @@ Disabling Wi-Fi preserves it; Forget network and Factory reset erase it.
 
 After connection Pocket Deck synchronizes UTC through NTP. Settings > Wi-Fi >
 Network info displays connection state, SDK status, SSID, RSSI, local IP,
-gateway, DNS, and NTP UTC time. Scanning and connecting are non-blocking so the
-BLE keyboard and UI continue running while Wi-Fi changes state.
+gateway, DNS, and NTP UTC time. The status-bar clock displays UTC+8 and keeps
+advancing for the rest of the current boot if Wi-Fi later disconnects. Scanning
+and connecting are non-blocking so the BLE keyboard and UI continue running
+while Wi-Fi changes state.
 
 ## Weather
 
@@ -214,6 +217,12 @@ wind, WMO weather condition, today's high/low, and local sunrise/sunset from
 [Open-Meteo](https://open-meteo.com/en/docs). No API key is required. Press
 Enter to refresh manually; successful data refreshes automatically after 15
 minutes or after moving roughly 0.05 degrees.
+
+The last successful forecast remains visible in RAM if GPS or Wi-Fi later
+disconnects. Its footer changes from `LIVE` to an amber cached status with its
+age and the missing input. A failed refresh also preserves the previous data.
+Fresh GPS and Wi-Fi are required to update the forecast, not to view it. The
+cache is cleared on restart.
 
 The HTTPS request runs in a separate FreeRTOS task so a slow forecast endpoint
 does not block keyboard input or rendering. This first implementation accepts

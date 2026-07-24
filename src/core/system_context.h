@@ -43,6 +43,9 @@ struct SystemContext {
     bool bleConnected = false;
     bool wifiEnabled = false;
     bool wifiConnected = false;
+    bool clockValid = false;
+    uint8_t clockHour = 0;
+    uint8_t clockMinute = 0;
     uint8_t activeModifiers = 0;
     uint32_t uptimeMs = 0;
     uint32_t freeHeap = 0;

@@ -47,8 +47,7 @@ void LauncherApp::onInput(const InputEvent& event, SystemContext& context) {
 
 void LauncherApp::render(Display& display, const SystemContext& context) {
     auto& canvas = display.canvas();
-    drawStatusBar(display, {"POCKET DECK", context.bleEnabled, context.bleConnected,
-                            context.batteryPercent});
+    drawStatusBar(display, makeStatusBarData("POCKET DECK", context));
 
     constexpr int16_t cardX = 52;
     constexpr int16_t cardY = 27;

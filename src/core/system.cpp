@@ -1,8 +1,11 @@
 #include "core/system.h"
 
+#include <ctime>
+
 #include <Arduino.h>
 #include <esp_system.h>
 
+#include "core/clock_data.h"
 #include "pocket_deck_config.h"
 
 namespace pd {
@@ -254,6 +257,11 @@ void System::refreshContext(uint32_t nowMs) {
     const WifiSnapshot& wifi = wifi_.snapshot();
     context_.wifiEnabled = wifi.enabled;
     context_.wifiConnected = wifi.connected;
+    const ClockDisplay localClock = clockFromUtcEpoch(
+        static_cast<int64_t>(std::time(nullptr)), config::kLocalUtcOffsetSeconds);
+    context_.clockValid = localClock.valid;
+    context_.clockHour = localClock.hour;
+    context_.clockMinute = localClock.minute;
 }
 
 void System::trackBleState(const BleKeyboardSnapshot& snapshot) {

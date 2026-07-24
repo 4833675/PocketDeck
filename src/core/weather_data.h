@@ -12,6 +12,20 @@ enum class WeatherState : uint8_t {
     Error,
 };
 
+enum class WeatherDisplayState : uint8_t {
+    Live,
+    Updating,
+    CachedNoGps,
+    CachedOffline,
+    CachedError,
+    WifiOff,
+    NoNetwork,
+    WaitingGps,
+    Fetching,
+    Error,
+    ReadyToFetch,
+};
+
 struct WeatherSnapshot {
     WeatherState state = WeatherState::Idle;
     bool valid = false;
@@ -35,5 +49,9 @@ struct WeatherSnapshot {
 
 const char* weatherStateLabel(WeatherState state);
 const char* weatherCodeLabel(uint8_t code);
+WeatherDisplayState classifyWeatherDisplay(const WeatherSnapshot& weather,
+                                           bool wifiEnabled, bool wifiConnected,
+                                           bool gpsFresh);
+bool weatherDisplayShowsData(WeatherDisplayState state);
 
 }  // namespace pd

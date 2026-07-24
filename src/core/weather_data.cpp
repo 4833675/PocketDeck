@@ -27,4 +27,30 @@ const char* weatherCodeLabel(uint8_t code) {
     return "UNKNOWN";
 }
 
+WeatherDisplayState classifyWeatherDisplay(const WeatherSnapshot& weather,
+                                           bool wifiEnabled, bool wifiConnected,
+                                           bool gpsFresh) {
+    if (weather.valid) {
+        if (weather.state == WeatherState::Fetching) return WeatherDisplayState::Updating;
+        if (weather.state == WeatherState::Error) return WeatherDisplayState::CachedError;
+        if (!wifiConnected) return WeatherDisplayState::CachedOffline;
+        if (!gpsFresh) return WeatherDisplayState::CachedNoGps;
+        return WeatherDisplayState::Live;
+    }
+
+    if (!wifiEnabled) return WeatherDisplayState::WifiOff;
+    if (!wifiConnected) return WeatherDisplayState::NoNetwork;
+    if (!gpsFresh) return WeatherDisplayState::WaitingGps;
+    if (weather.state == WeatherState::Fetching) return WeatherDisplayState::Fetching;
+    if (weather.state == WeatherState::Error) return WeatherDisplayState::Error;
+    return WeatherDisplayState::ReadyToFetch;
+}
+
+bool weatherDisplayShowsData(WeatherDisplayState state) {
+    return state == WeatherDisplayState::Live || state == WeatherDisplayState::Updating ||
+           state == WeatherDisplayState::CachedNoGps ||
+           state == WeatherDisplayState::CachedOffline ||
+           state == WeatherDisplayState::CachedError;
+}
+
 }  // namespace pd

@@ -50,9 +50,7 @@ void KeyboardApp::render(Display& display, const SystemContext& context) {
                                              ? context.bleKeyboard->snapshot()
                                              : BleKeyboardSnapshot{};
     auto& canvas = display.canvas();
-    drawStatusBar(display, {"KEYBOARD", snapshot.enabled,
-                            snapshot.state == BleKeyboardState::Connected,
-                            context.batteryPercent});
+    drawStatusBar(display, makeStatusBarData("KEYBOARD", context));
 
     const uint16_t stateColor = snapshot.state == BleKeyboardState::Connected
                                     ? theme::kPrimary
@@ -105,4 +103,3 @@ void KeyboardApp::render(Display& display, const SystemContext& context) {
 }
 
 }  // namespace pd
-
