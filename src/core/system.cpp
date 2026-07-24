@@ -44,6 +44,7 @@ void System::begin() {
     Serial.begin(config::kSerialBaud);
     context_.resetReason = resetReasonName(esp_reset_reason());
     context_.bleKeyboard = &bleKeyboard_;
+    context_.gps = &gps_;
     context_.diagnostics = &diagnostics_;
     context_.settings = &settings_;
     diagnostics_.logf("Boot reset: %s", context_.resetReason);
@@ -63,23 +64,27 @@ void System::begin() {
     board_.setBrightness(settings_.brightness);
     board_.setVolume(settings_.volume);
     const bool canvasReady = display_.begin();
+    const bool gpsReady = gps_.begin();
+    diagnostics_.logf("GPS UART: %s 115200 RX15 TX13", gpsReady ? "ready" : "failed");
     bleKeyboard_.setEnabled(settings_.bleEnabled);
     const bool bleReady = bleKeyboard_.begin(settings_.deviceName.data());
     refreshContext(millis());
     trackBleState(bleKeyboard_.snapshot());
     current_ = &launcher_;
     current_->onEnter(context_);
-    diagnostics_.logf("System ready: display=%d BLE=%d", canvasReady ? 1 : 0,
-                      bleReady ? 1 : 0);
+    diagnostics_.logf("System ready: display=%d BLE=%d GPS=%d", canvasReady ? 1 : 0,
+                      bleReady ? 1 : 0, gpsReady ? 1 : 0);
     render();
 }
 
 void System::update() {
     board_.update();
     const uint32_t nowMs = millis();
+    gps_.update();
     refreshContext(nowMs);
     bleKeyboard_.updateBattery(context_.batteryPercent);
     trackBleState(bleKeyboard_.snapshot());
+    trackGpsState(gps_.snapshot());
 
     const G0Action g0 = g0Gesture_.update(board_.g0Down(), nowMs);
     if (g0 == G0Action::QuickSettings && !quickSettings_.active()) {
@@ -127,6 +132,7 @@ void System::update() {
 App* System::appForId(AppId id) {
     if (id == AppId::Launcher) return &launcher_;
     if (id == AppId::Keyboard) return &keyboard_;
+    if (id == AppId::Gps) return &gpsApp_;
     if (id == AppId::Settings) return &settingsApp_;
     return nullptr;
 }
@@ -230,6 +236,15 @@ void System::trackBleState(const BleKeyboardSnapshot& snapshot) {
     }
     lastBleSnapshot_ = snapshot;
     lastBleSnapshotValid_ = true;
+}
+
+void System::trackGpsState(const GpsSnapshot& snapshot) {
+    const GpsState state = classifyGpsState(snapshot);
+    if (!lastGpsStateValid_ || state != lastGpsState_) {
+        diagnostics_.logf("GPS state: %s", gpsStateLabel(state));
+        lastGpsState_ = state;
+        lastGpsStateValid_ = true;
+    }
 }
 
 bool System::saveSettings() {

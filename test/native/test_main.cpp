@@ -7,6 +7,7 @@
 #include "apps/settings/settings_model.h"
 #include "core/ble_keyboard_policy.h"
 #include "core/g0_gesture.h"
+#include "core/gps_data.h"
 #include "core/input_router.h"
 #include "core/mac_keymap.h"
 #include "core/system_settings.h"
@@ -225,6 +226,8 @@ TEST_CASE(launcher_starts_on_keyboard_and_wraps) {
     LauncherModel model;
     CHECK_EQ(model.selected(), AppId::Keyboard);
     model.handle(InputAction::Right);
+    CHECK_EQ(model.selected(), AppId::Gps);
+    model.handle(InputAction::Right);
     CHECK_EQ(model.selected(), AppId::Settings);
     model.handle(InputAction::Right);
     CHECK_EQ(model.selected(), AppId::Keyboard);
@@ -236,8 +239,50 @@ TEST_CASE(launcher_confirm_requests_selected_app) {
     LauncherModel model;
     CHECK_EQ(model.handle(InputAction::Confirm), AppId::Keyboard);
     model.handle(InputAction::Right);
+    CHECK_EQ(model.handle(InputAction::Confirm), AppId::Gps);
+    model.handle(InputAction::Right);
     CHECK_EQ(model.handle(InputAction::Confirm), AppId::Settings);
     CHECK_EQ(model.handle(InputAction::Back), AppId::None);
+}
+
+TEST_CASE(gps_state_distinguishes_stream_search_fix_and_stale) {
+    GpsSnapshot snapshot;
+    CHECK_EQ(classifyGpsState(snapshot), GpsState::NoData);
+
+    snapshot.charsProcessed = 120;
+    snapshot.dataAgeMs = 50;
+    CHECK_EQ(classifyGpsState(snapshot), GpsState::Searching);
+
+    snapshot.locationValid = true;
+    snapshot.locationAgeMs = 250;
+    CHECK_EQ(classifyGpsState(snapshot), GpsState::Fix);
+
+    snapshot.locationAgeMs = 6000;
+    CHECK_EQ(classifyGpsState(snapshot), GpsState::Stale);
+
+    snapshot.dataAgeMs = 4000;
+    CHECK_EQ(classifyGpsState(snapshot), GpsState::NoStream);
+}
+
+TEST_CASE(gps_compass_points_cover_cardinal_and_intercardinal_directions) {
+    CHECK_STR_EQ(gpsCompassPoint(0.0), "N");
+    CHECK_STR_EQ(gpsCompassPoint(44.9), "NE");
+    CHECK_STR_EQ(gpsCompassPoint(90.0), "E");
+    CHECK_STR_EQ(gpsCompassPoint(180.0), "S");
+    CHECK_STR_EQ(gpsCompassPoint(270.0), "W");
+    CHECK_STR_EQ(gpsCompassPoint(359.9), "N");
+    CHECK_STR_EQ(gpsCompassPoint(-90.0), "W");
+}
+
+TEST_CASE(gps_fix_quality_and_mode_have_readable_labels) {
+    CHECK_STR_EQ(gpsFixQualityLabel('0'), "NONE");
+    CHECK_STR_EQ(gpsFixQualityLabel('1'), "GPS");
+    CHECK_STR_EQ(gpsFixQualityLabel('2'), "DGPS");
+    CHECK_STR_EQ(gpsFixQualityLabel('4'), "RTK");
+    CHECK_STR_EQ(gpsFixQualityLabel('?'), "--");
+    CHECK_STR_EQ(gpsFixModeLabel('A'), "AUTON");
+    CHECK_STR_EQ(gpsFixModeLabel('D'), "DIFF");
+    CHECK_STR_EQ(gpsFixModeLabel('N'), "NONE");
 }
 
 TEST_CASE(single_host_policy_rejects_unknown_peer_after_bond) {
@@ -416,6 +461,9 @@ int main() {
     settings_sanitizer_clamps_and_repairs();
     launcher_starts_on_keyboard_and_wraps();
     launcher_confirm_requests_selected_app();
+    gps_state_distinguishes_stream_search_fix_and_stale();
+    gps_compass_points_cover_cardinal_and_intercardinal_directions();
+    gps_fix_quality_and_mode_have_readable_labels();
     single_host_policy_rejects_unknown_peer_after_bond();
     ble_report_gate_sends_release_then_deduplicates();
     disconnect_blocks_reports_and_resets_gate();

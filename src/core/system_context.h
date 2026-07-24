@@ -8,6 +8,7 @@ namespace pd {
 
 class BleKeyboardService;
 class DiagnosticsService;
+class GpsService;
 struct SystemSettings;
 
 enum class SystemCommand : uint8_t {
@@ -30,6 +31,7 @@ struct SystemContext {
     uint32_t minimumFreeHeap = 0;
     const char* resetReason = "unknown";
     BleKeyboardService* bleKeyboard = nullptr;
+    GpsService* gps = nullptr;
     const DiagnosticsService* diagnostics = nullptr;
     const SystemSettings* settings = nullptr;
 

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "apps/gps/gps_app.h"
 #include "apps/keyboard/keyboard_app.h"
 #include "apps/launcher/launcher_app.h"
 #include "apps/settings/settings_app.h"
@@ -11,6 +12,7 @@
 #include "drivers/display.h"
 #include "services/ble_keyboard_service.h"
 #include "services/diagnostics_service.h"
+#include "services/gps_service.h"
 #include "services/settings_store.h"
 #include "ui/quick_settings.h"
 
@@ -32,12 +34,14 @@ private:
     void handleSystemCommand(SystemCommand command);
     void refreshContext(uint32_t nowMs);
     void trackBleState(const BleKeyboardSnapshot& snapshot);
+    void trackGpsState(const GpsSnapshot& snapshot);
     bool saveSettings();
     void render();
 
     Board board_;
     Display display_;
     BleKeyboardService bleKeyboard_;
+    GpsService gps_;
     DiagnosticsService diagnostics_;
     SettingsStore settingsStore_;
     SystemSettings settings_ = SystemSettings::defaults();
@@ -46,11 +50,14 @@ private:
     SystemContext context_;
     LauncherApp launcher_;
     KeyboardApp keyboard_;
+    GpsApp gpsApp_;
     SettingsApp settingsApp_;
     QuickSettings quickSettings_;
     App* current_ = nullptr;
     BleKeyboardSnapshot lastBleSnapshot_{};
     bool lastBleSnapshotValid_ = false;
+    GpsState lastGpsState_ = GpsState::NoData;
+    bool lastGpsStateValid_ = false;
     uint32_t lastRenderMs_ = 0;
 };
 

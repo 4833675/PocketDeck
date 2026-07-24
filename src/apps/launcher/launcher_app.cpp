@@ -1,8 +1,12 @@
 #include "apps/launcher/launcher_app.h"
 
+#include <cstdio>
+
+#include "core/gps_data.h"
 #include "core/system_context.h"
 #include "drivers/display.h"
 #include "pocket_deck_config.h"
+#include "services/gps_service.h"
 #include "ui/status_bar.h"
 #include "ui/theme.h"
 
@@ -10,11 +14,21 @@ namespace pd {
 namespace {
 
 const char* appTitle(AppId id) {
-    return id == AppId::Keyboard ? "KEYBOARD" : "SETTINGS";
+    switch (id) {
+        case AppId::Keyboard: return "KEYBOARD";
+        case AppId::Gps: return "GPS";
+        case AppId::Settings: return "SETTINGS";
+        default: return "APP";
+    }
 }
 
 const char* appIcon(AppId id) {
-    return id == AppId::Keyboard ? ">_" : "::";
+    switch (id) {
+        case AppId::Keyboard: return ">_";
+        case AppId::Gps: return "G+";
+        case AppId::Settings: return "::";
+        default: return "--";
+    }
 }
 
 }  // namespace
@@ -50,9 +64,21 @@ void LauncherApp::render(Display& display, const SystemContext& context) {
     canvas.setTextColor(theme::kText, theme::kPanelRaised);
     canvas.drawString(appTitle(model_.selected()), cardX + cardW / 2, cardY + 47);
     canvas.setTextColor(theme::kMuted, theme::kPanelRaised);
-    const char* subtitle = model_.selected() == AppId::Keyboard
-                               ? (context.bleConnected ? "Mac connected" : "Ready to pair")
-                               : "System controls";
+    char subtitle[32];
+    if (model_.selected() == AppId::Keyboard) {
+        std::snprintf(subtitle, sizeof(subtitle), "%s",
+                      context.bleConnected ? "Mac connected" : "Ready to pair");
+    } else if (model_.selected() == AppId::Gps) {
+        const GpsSnapshot gps = context.gps != nullptr ? context.gps->snapshot() : GpsSnapshot{};
+        if (classifyGpsState(gps) == GpsState::Fix && gps.satellitesValid) {
+            std::snprintf(subtitle, sizeof(subtitle), "Fix / %lu satellites",
+                          static_cast<unsigned long>(gps.satellites));
+        } else {
+            std::snprintf(subtitle, sizeof(subtitle), "%s", gpsStateLabel(classifyGpsState(gps)));
+        }
+    } else {
+        std::snprintf(subtitle, sizeof(subtitle), "System controls");
+    }
     canvas.drawString(subtitle, cardX + cardW / 2, cardY + 62);
 
     const int16_t hintY = config::kScreenHeight - theme::kHintHeight;
@@ -64,4 +90,3 @@ void LauncherApp::render(Display& display, const SystemContext& context) {
 }
 
 }  // namespace pd
-

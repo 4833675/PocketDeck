@@ -5,9 +5,10 @@ Cardputer Adv. It is a new firmware project: it does not depend on Claude
 Desktop, the Hardware Buddy protocol, or the source code of the earlier Claude
 Buddy firmware.
 
-The current `0.1.0` foundation contains a Graphite Mint system shell, launcher,
-secure single-host Bluetooth LE keyboard for macOS, Bluetooth/System settings,
-Quick Settings, persistent preferences, and on-device diagnostics.
+The current `0.2.0` firmware contains a Graphite Mint system shell, launcher,
+secure single-host Bluetooth LE keyboard for macOS, a live GNSS/GPS app for the
+Cap LoRa-1262, Bluetooth/System settings, Quick Settings, persistent
+preferences, and on-device diagnostics.
 
 Hardware BLE behavior is not considered verified until the checklist in
 [`docs/validation/ble-keyboard-smoke-test.md`](docs/validation/ble-keyboard-smoke-test.md)
@@ -20,7 +21,7 @@ has been completed on a real Cardputer Adv.
 - One 3 MB application partition plus LittleFS; no OTA slot and no PSRAM.
 - One stable BLE HID identity named `Pocket Deck` and one bonded Mac.
 - English UI with built-in fonts; no filesystem assets are currently required.
-- No Wi-Fi UI, microphone, dictation, Claude integration, GPS, LoRa, or IR in
+- No Wi-Fi UI, microphone, dictation, Claude integration, LoRa radio, or IR in
   this phase. Those are deliberately absent rather than placeholder menu items.
 - The old project at `/Users/kx/M5Stack/claude-desktop-buddy-cardputer` is
   independent and remains available to build or flash separately.
@@ -86,8 +87,8 @@ layer:
 | G0 short press | Return directly to Home |
 | G0 hold for 600 ms | Open Quick Settings |
 
-Home is a horizontal card launcher. Use Fn+`,` and Fn+`/` to select Keyboard or
-Settings, then Enter to open it. Every boot returns to Home with Keyboard
+Home is a horizontal card launcher. Use Fn+`,` and Fn+`/` to select Keyboard,
+GPS, or Settings, then Enter to open it. Every boot returns to Home with Keyboard
 selected; booting never makes ordinary keys active as HID input by itself.
 
 Quick Settings is an overlay over the current app:
@@ -152,6 +153,37 @@ Without Fn, `` ` ``, `;`, `,`, `.`, and `/` remain ordinary punctuation.
 Reports support the standard six simultaneous non-modifier keys plus the
 modifier byte; larger chords produce the standard HID rollover report.
 
+## GPS / GNSS
+
+The GPS app supports the M5Stack Cap LoRa-1262 attached to the Cardputer Adv
+14-pin expansion connector. Its ATGM336H/AT6668 receiver sends NMEA 0183 4.1 at
+115200 baud. Pocket Deck reads Cap `GPS_TX` on GPIO15 and assigns GPIO13 as the
+return UART pin. The GPS service runs continuously in the background, including
+while Home, Keyboard, or Settings is visible.
+
+Select GPS in Home and press Enter. Use Fn+`,` / Fn+`/` or Tab to move through
+three pages:
+
+1. Position: fix state, latitude, longitude, altitude, satellites, HDOP, fix
+   age, and incoming-data age.
+2. Motion/time: UTC date and time, speed in km/h, course in degrees and an
+   eight-point compass direction, plus fix mode and quality.
+3. Receiver: UART configuration, NMEA character count, valid sentence count,
+   checksum error count, and sentences containing a fix.
+
+The status distinguishes `NO DATA`, `NO STREAM`, `SEARCHING`, `STALE FIX`, and
+`FIX`. On the receiver page:
+
+- `RX CHARS` rising means bytes are arriving from the Cap.
+- `CHECKSUM OK` rising means the baud rate and NMEA stream are valid.
+- `CHECKSUM ERR` rising rapidly while OK remains zero suggests corrupted input
+  or an incorrect module configuration.
+
+GPS time is displayed as UTC rather than silently applying a local timezone.
+The Cap uses a built-in ceramic GNSS antenna; first position acquisition should
+be tested outdoors with a broad view of the sky. A cold start can take minutes
+in real conditions even though valid NMEA data appears immediately.
+
 ## Bluetooth and System settings
 
 Open Settings from Home, select a category with Up/Down, and press Enter.
@@ -182,13 +214,18 @@ settings. Missing or invalid settings safely restore defaults.
   or `ADVERTISING`, then verify Bluetooth is ON in Quick Settings or Settings.
 - **Connected but no typing:** Keyboard must be the foreground app and its
   screen must say `CONNECTED`. Home and Settings always consume keys locally.
-- **A different computer cannot pair:** v0.1.0 is intentionally single-host.
+- **A different computer cannot pair:** Pocket Deck is intentionally single-host.
   Use Settings > Bluetooth > Forget host, confirm it, and pair the new Mac.
 - **Reconnect behaves strangely:** use Disconnect first. Use Forget host only
   when deliberately replacing or repairing the bond.
 - **Serial shows little after reset:** native USB may re-enumerate after early
   boot logs. Read Settings > System > Diagnostics or open the monitor before a
   manual reset.
+- **GPS stays at `NO DATA`:** verify the Cap is fully seated and open GPS page
+  3/3. `RX CHARS` must increase. This firmware expects the Cap LoRa-1262 default
+  115200-baud configuration.
+- **GPS says `SEARCHING`:** the serial/NMEA path is working; move outdoors with
+  the ceramic antenna facing open sky and allow time for a cold start.
 - **Need a clean compile:** run `pio run -e cardputer-adv -t clean`, then build
   again. A full flash erase is not part of the normal update path.
 
@@ -197,9 +234,9 @@ settings. Missing or invalid settings safely restore defaults.
 ```text
 src/core/       system loop, app lifecycle, input routing, settings model
 src/drivers/    Cardputer board and display adapters
-src/services/   BLE HID, Preferences persistence, bounded diagnostics
+src/services/   BLE HID, GPS UART/parser, Preferences, diagnostics
 src/ui/         Graphite Mint widgets and Quick Settings
-src/apps/       launcher, Keyboard, and Settings
+src/apps/       launcher, Keyboard, GPS, and Settings
 test/native/    hardware-independent C++ tests
 ```
 
