@@ -11,8 +11,13 @@ struct ReportDecision {
 
 class BleKeyboardPolicy {
 public:
-    static bool peerAllowed(bool hasStoredBond, bool incomingPeerIsBonded) {
-        return !hasStoredBond || incomingPeerIsBonded;
+    // A physical BLE connection is not an identity check: bonded centrals may
+    // reconnect with a resolvable private address. Let the stack resolve the
+    // existing bond and only block a *new pairing* while a bond is stored.
+    static bool newPairingAllowed(bool hasStoredBond) { return !hasStoredBond; }
+
+    static bool deadlineReached(uint32_t nowMs, uint32_t deadlineMs) {
+        return static_cast<int32_t>(nowMs - deadlineMs) >= 0;
     }
 
     void setConnected(bool connected);
@@ -26,4 +31,3 @@ private:
 };
 
 }  // namespace pd
-

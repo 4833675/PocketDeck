@@ -47,6 +47,7 @@ public:
     BleKeyboardService& operator=(const BleKeyboardService&) = delete;
 
     bool begin(const char* deviceName);
+    void update(uint32_t nowMs);
     void setEnabled(bool enabled);
     bool sendReport(const HidReport& report);
     void updateBattery(uint8_t percent);
@@ -62,14 +63,18 @@ private:
     friend class ServerCallbacks;
     friend class SecurityCallbacks;
 
-    void handleConnect(BLEServer* server, uint16_t connectionId, const uint8_t* peerAddress);
+    void handleConnect(uint16_t connectionId, const uint8_t* peerAddress,
+                       uint8_t peerAddressType);
     void handleDisconnect(uint8_t reason);
     void handleAuthentication(bool success, uint8_t reason, uint8_t authMode,
-                              bool keyPresent);
+                              bool keyPresent, const uint8_t* peerAddress,
+                              uint8_t peerAddressType);
+    bool allowNewPairing(const char* eventName);
+    void handlePasskeyNotification(uint32_t passkey);
     void startAdvertising();
+    void requestAdvertising(uint32_t delayMs);
     void generatePasskey();
     bool hasStoredBond() const;
-    bool peerIsBonded(const uint8_t* address) const;
 
     BLEServer* server_ = nullptr;
     BLEHIDDevice* hid_ = nullptr;
@@ -84,6 +89,10 @@ private:
     std::atomic<bool> connected_{false};
     std::atomic<bool> encrypted_{false};
     std::atomic<bool> bonded_{false};
+    std::atomic<bool> bondedAtConnect_{false};
+    std::atomic<bool> pairingRejected_{false};
+    std::atomic<bool> advertisingPending_{false};
+    std::atomic<uint32_t> advertisingDueMs_{0};
     std::atomic<uint16_t> connectionId_{0};
     std::atomic<uint32_t> passkey_{0};
     std::atomic<uint8_t> lastDisconnectReason_{0};

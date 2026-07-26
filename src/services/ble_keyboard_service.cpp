@@ -2,7 +2,7 @@
 
 #include <algorithm>
 #include <array>
-#include <cstring>
+#include <cstdio>
 
 #include <Arduino.h>
 #include <BLE2902.h>
@@ -53,8 +53,13 @@ constexpr uint8_t kKeyboardReportMap[] = {
     0xC0,              // End Collection
 };
 
-bool sameAddress(const uint8_t* left, const uint8_t* right) {
-    return std::memcmp(left, right, ESP_BD_ADDR_LEN) == 0;
+void formatAddress(char* output, size_t outputSize, const uint8_t* address) {
+    if (address == nullptr) {
+        std::snprintf(output, outputSize, "--:--:--:--:--:--");
+        return;
+    }
+    std::snprintf(output, outputSize, "%02X:%02X:%02X:%02X:%02X:%02X", address[0],
+                  address[1], address[2], address[3], address[4], address[5]);
 }
 
 }  // namespace
@@ -63,8 +68,9 @@ class BleKeyboardService::ServerCallbacks final : public BLEServerCallbacks {
 public:
     explicit ServerCallbacks(BleKeyboardService& owner) : owner_(owner) {}
 
-    void onConnect(BLEServer* server, esp_ble_gatts_cb_param_t* param) override {
-        owner_.handleConnect(server, param->connect.conn_id, param->connect.remote_bda);
+    void onConnect(BLEServer*, esp_ble_gatts_cb_param_t* param) override {
+        owner_.handleConnect(param->connect.conn_id, param->connect.remote_bda,
+                             static_cast<uint8_t>(param->connect.ble_addr_type));
     }
 
     void onDisconnect(BLEServer*, esp_ble_gatts_cb_param_t* param) override {
@@ -82,15 +88,23 @@ class BleKeyboardService::SecurityCallbacks final : public BLESecurityCallbacks 
 public:
     explicit SecurityCallbacks(BleKeyboardService& owner) : owner_(owner) {}
 
-    uint32_t onPassKeyRequest() override { return owner_.passkey_.load(); }
-    void onPassKeyNotify(uint32_t passkey) override { owner_.passkey_.store(passkey); }
+    uint32_t onPassKeyRequest() override {
+        if (!owner_.allowNewPairing("passkey request")) return 0;
+        return owner_.passkey_.load();
+    }
+    void onPassKeyNotify(uint32_t passkey) override {
+        owner_.handlePasskeyNotification(passkey);
+    }
     bool onSecurityRequest() override { return true; }
-    bool onConfirmPIN(uint32_t) override { return true; }
+    bool onConfirmPIN(uint32_t) override {
+        return owner_.allowNewPairing("numeric comparison");
+    }
 
     void onAuthenticationComplete(esp_ble_auth_cmpl_t result) override {
         owner_.handleAuthentication(result.success, result.fail_reason,
                                     static_cast<uint8_t>(result.auth_mode),
-                                    result.key_present);
+                                    result.key_present, result.bd_addr,
+                                    static_cast<uint8_t>(result.addr_type));
     }
 
 private:
@@ -146,16 +160,25 @@ bool BleKeyboardService::begin(const char* deviceName) {
     return true;
 }
 
+void BleKeyboardService::update(uint32_t nowMs) {
+    if (!advertisingPending_.load() || !enabled_.load() || connected_.load()) return;
+    const uint32_t dueMs = advertisingDueMs_.load();
+    if (!BleKeyboardPolicy::deadlineReached(nowMs, dueMs)) return;
+    if (!advertisingPending_.exchange(false)) return;
+    startAdvertising();
+}
+
 void BleKeyboardService::setEnabled(bool enabled) {
     enabled_.store(enabled);
     if (!initialized_.load()) return;
     if (!enabled) {
+        advertisingPending_.store(false);
         disconnect();
         BLEDevice::getAdvertising()->stop();
         reportPolicy_.setConnected(false);
         return;
     }
-    startAdvertising();
+    requestAdvertising(0);
 }
 
 bool BleKeyboardService::sendReport(const HidReport& report) {
@@ -214,7 +237,7 @@ bool BleKeyboardService::forgetHost() {
         security_->setStaticPIN(passkey_.load());
         security_->setAuthenticationMode(ESP_LE_AUTH_REQ_SC_MITM_BOND);
     }
-    if (enabled_.load()) startAdvertising();
+    requestAdvertising(350);
     Serial.println("[ble] host bond cleared");
     return true;
 }
@@ -254,34 +277,20 @@ const char* BleKeyboardService::errorText() const {
     return "unknown";
 }
 
-void BleKeyboardService::handleConnect(BLEServer* server, uint16_t connectionId,
-                                       const uint8_t* peerAddress) {
-    const bool storedBond = hasStoredBond();
-    const bool knownPeer = peerIsBonded(peerAddress);
-    if (!BleKeyboardPolicy::peerAllowed(storedBond, knownPeer)) {
-        error_.store(BleKeyboardError::UnauthorizedPeer);
-        server->disconnect(connectionId);
-        Serial.println("[ble] rejected unknown host");
-        return;
-    }
-
+void BleKeyboardService::handleConnect(uint16_t connectionId, const uint8_t* peerAddress,
+                                       uint8_t peerAddressType) {
+    advertisingPending_.store(false);
+    const int bondCount = esp_ble_get_bond_device_num();
+    bondedAtConnect_.store(bondCount > 0);
+    pairingRejected_.store(false);
     connectionId_.store(connectionId);
     connected_.store(true);
     encrypted_.store(false);
     error_.store(BleKeyboardError::None);
-    Serial.println("[ble] host connected, requesting encryption");
-
-    // A bonded central does not have to initiate security immediately. Request
-    // it here so a reconnect restores the encrypted HID link before macOS
-    // decides the peripheral is not ready and drops the connection.
-    esp_bd_addr_t encryptionPeer{};
-    std::memcpy(encryptionPeer, peerAddress, sizeof(encryptionPeer));
-    const esp_err_t result =
-        esp_ble_set_encryption(encryptionPeer, ESP_BLE_SEC_ENCRYPT_MITM);
-    if (result != ESP_OK) {
-        Serial.printf("[ble] encryption request returned 0x%x\n",
-                      static_cast<unsigned>(result));
-    }
+    char addressText[18];
+    formatAddress(addressText, sizeof(addressText), peerAddress);
+    Serial.printf("[ble] host connected, addr=%s type=%u bonds=%d; awaiting stack encryption\n",
+                  addressText, peerAddressType, bondCount);
 }
 
 void BleKeyboardService::handleDisconnect(uint8_t reason) {
@@ -290,16 +299,35 @@ void BleKeyboardService::handleDisconnect(uint8_t reason) {
     lastDisconnectReason_.store(reason);
     reportPolicy_.setConnected(false);
     Serial.printf("[ble] host disconnected, reason=0x%02x\n", reason);
-    if (enabled_.load()) startAdvertising();
+    const BleKeyboardError currentError = error_.load();
+    if (currentError == BleKeyboardError::UnauthorizedPeer ||
+        currentError == BleKeyboardError::AuthenticationFailed) {
+        error_.store(BleKeyboardError::None);
+    }
+    requestAdvertising(350);
 }
 
 void BleKeyboardService::handleAuthentication(bool success, uint8_t reason, uint8_t authMode,
-                                              bool keyPresent) {
+                                              bool keyPresent, const uint8_t* peerAddress,
+                                              uint8_t peerAddressType) {
     if (!success) {
         encrypted_.store(false);
         error_.store(BleKeyboardError::AuthenticationFailed);
-        Serial.printf("[ble] authentication failed: reason=0x%02x auth=0x%02x\n", reason,
-                      authMode);
+        char addressText[18];
+        formatAddress(addressText, sizeof(addressText), peerAddress);
+        Serial.printf("[ble] authentication failed, addr=%s type=%u reason=0x%02x auth=0x%02x\n",
+                      addressText, peerAddressType, reason, authMode);
+        if (server_ != nullptr && connected_.load()) {
+            server_->disconnect(connectionId_.load());
+        }
+        return;
+    }
+
+    if (pairingRejected_.load()) {
+        Serial.println("[ble] ignoring authentication after rejected pairing");
+        if (server_ != nullptr && connected_.load()) {
+            server_->disconnect(connectionId_.load());
+        }
         return;
     }
 
@@ -307,13 +335,40 @@ void BleKeyboardService::handleAuthentication(bool success, uint8_t reason, uint
     encrypted_.store(true);
     bonded_.store(bondStored);
     error_.store(BleKeyboardError::None);
-    Serial.printf("[ble] encrypted, bond=%d auth=0x%02x key=%d\n", bondStored ? 1 : 0,
-                  authMode, keyPresent ? 1 : 0);
+    char addressText[18];
+    formatAddress(addressText, sizeof(addressText), peerAddress);
+    Serial.printf("[ble] encrypted, addr=%s type=%u bond=%d auth=0x%02x key=%d\n",
+                  addressText, peerAddressType, bondStored ? 1 : 0, authMode,
+                  keyPresent ? 1 : 0);
+}
+
+bool BleKeyboardService::allowNewPairing(const char* eventName) {
+    if (BleKeyboardPolicy::newPairingAllowed(bondedAtConnect_.load())) return true;
+    if (!pairingRejected_.exchange(true)) {
+        error_.store(BleKeyboardError::UnauthorizedPeer);
+        Serial.printf("[ble] rejected new pairing (%s); forget host first\n", eventName);
+        if (server_ != nullptr && connected_.load()) {
+            server_->disconnect(connectionId_.load());
+        }
+    }
+    return false;
+}
+
+void BleKeyboardService::handlePasskeyNotification(uint32_t passkey) {
+    if (!allowNewPairing("passkey notification")) return;
+    passkey_.store(passkey);
 }
 
 void BleKeyboardService::startAdvertising() {
-    if (!initialized_.load() || !enabled_.load()) return;
+    if (!initialized_.load() || !enabled_.load() || connected_.load()) return;
     BLEDevice::startAdvertising();
+    Serial.println("[ble] advertising start requested");
+}
+
+void BleKeyboardService::requestAdvertising(uint32_t delayMs) {
+    if (!initialized_.load() || !enabled_.load()) return;
+    advertisingDueMs_.store(millis() + delayMs);
+    advertisingPending_.store(true);
 }
 
 void BleKeyboardService::generatePasskey() {
@@ -322,18 +377,6 @@ void BleKeyboardService::generatePasskey() {
 
 bool BleKeyboardService::hasStoredBond() const {
     return esp_ble_get_bond_device_num() > 0;
-}
-
-bool BleKeyboardService::peerIsBonded(const uint8_t* address) const {
-    int count = esp_ble_get_bond_device_num();
-    if (count <= 0) return false;
-    std::array<esp_ble_bond_dev_t, 8> devices{};
-    int listed = std::min<int>(count, devices.size());
-    if (esp_ble_get_bond_device_list(&listed, devices.data()) != ESP_OK) return false;
-    for (int index = 0; index < listed; ++index) {
-        if (sameAddress(devices[index].bd_addr, address)) return true;
-    }
-    return false;
 }
 
 }  // namespace pd

@@ -92,6 +92,7 @@ void System::update() {
     const uint32_t nowMs = millis();
     gps_.update();
     wifi_.update(nowMs);
+    bleKeyboard_.update(nowMs);
     refreshContext(nowMs);
     bleKeyboard_.updateBattery(context_.batteryPercent);
     trackBleState(bleKeyboard_.snapshot());

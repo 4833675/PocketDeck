@@ -379,10 +379,17 @@ TEST_CASE(gps_fix_quality_and_mode_have_readable_labels) {
     CHECK_STR_EQ(gpsFixModeLabel('N'), "NONE");
 }
 
-TEST_CASE(single_host_policy_rejects_unknown_peer_after_bond) {
-    CHECK(BleKeyboardPolicy::peerAllowed(false, false));
-    CHECK(BleKeyboardPolicy::peerAllowed(true, true));
-    CHECK(!BleKeyboardPolicy::peerAllowed(true, false));
+TEST_CASE(single_host_policy_allows_pairing_only_without_a_stored_bond) {
+    CHECK(BleKeyboardPolicy::newPairingAllowed(false));
+    CHECK(!BleKeyboardPolicy::newPairingAllowed(true));
+}
+
+TEST_CASE(ble_advertising_deadline_handles_millis_wraparound) {
+    CHECK(!BleKeyboardPolicy::deadlineReached(999, 1000));
+    CHECK(BleKeyboardPolicy::deadlineReached(1000, 1000));
+    CHECK(BleKeyboardPolicy::deadlineReached(1001, 1000));
+    CHECK(!BleKeyboardPolicy::deadlineReached(0xFFFFFFF0u, 0x00000010u));
+    CHECK(BleKeyboardPolicy::deadlineReached(0x00000010u, 0xFFFFFFF0u));
 }
 
 TEST_CASE(ble_report_gate_sends_release_then_deduplicates) {
@@ -599,7 +606,8 @@ int main() {
     gps_state_distinguishes_stream_search_fix_and_stale();
     gps_compass_points_cover_cardinal_and_intercardinal_directions();
     gps_fix_quality_and_mode_have_readable_labels();
-    single_host_policy_rejects_unknown_peer_after_bond();
+    single_host_policy_allows_pairing_only_without_a_stored_bond();
+    ble_advertising_deadline_handles_millis_wraparound();
     ble_report_gate_sends_release_then_deduplicates();
     disconnect_blocks_reports_and_resets_gate();
     diagnostics_ring_is_bounded_and_newest_first();
