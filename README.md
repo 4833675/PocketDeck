@@ -8,7 +8,7 @@ The Bluetooth keyboard and system shell run on the Cardputer Adv alone. The GPS
 dashboard and GPS-local weather additionally require the optional **M5Stack Cap
 LoRa-1262**, which contains the supported GNSS receiver.
 
-The current `0.3.3` firmware contains a Graphite Mint system shell, launcher,
+The current `0.3.4` firmware contains a Graphite Mint system shell, launcher,
 secure single-host Bluetooth LE keyboard for macOS, a live GNSS/GPS app for the
 Cap LoRa-1262, Wi-Fi scanning and connection, NTP time, GPS-local weather,
 Bluetooth/Wi-Fi/System settings, Quick Settings, persistent preferences,

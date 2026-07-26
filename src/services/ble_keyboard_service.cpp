@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <cstdio>
+#include <cstring>
 
 #include <Arduino.h>
 #include <BLE2902.h>
@@ -62,6 +63,21 @@ void formatAddress(char* output, size_t outputSize, const uint8_t* address) {
     }
     std::snprintf(output, outputSize, "%02X:%02X:%02X:%02X:%02X:%02X", address[0],
                   address[1], address[2], address[3], address[4], address[5]);
+}
+
+const char* authenticationFailureName(uint8_t reason) {
+    switch (reason) {
+        case 0x05: return "hci-auth-failure";
+        case 0x06: return "hci-key-missing";
+        case 0x50: return "smp-auth-failure";
+        case 0x51: return "smp-confirm-failure";
+        case 0x52: return "smp-not-supported";
+        case 0x56: return "smp-repeated-attempts";
+        case 0x61: return "smp-encryption-failure";
+        case 0x63: return "smp-response-timeout";
+        case 0x66: return "smp-connection-timeout";
+        default: return "unknown";
+    }
 }
 
 }  // namespace
@@ -294,10 +310,21 @@ void BleKeyboardService::handleConnect(uint16_t connectionId, const uint8_t* pee
     error_.store(BleKeyboardError::None);
     char addressText[18];
     formatAddress(addressText, sizeof(addressText), peerAddress);
+
+    // Start security immediately. In ESP-IDF 4.4.7, leaving a bonded HID link
+    // waiting for the peer to initiate SMP can end in SMP_CONN_TOUT; Bluedroid
+    // then removes the saved bonding keys. The official secure GATT server uses
+    // this same explicit encryption request from its connection callback.
+    esp_bd_addr_t encryptionPeer{};
+    std::memcpy(encryptionPeer, peerAddress, sizeof(encryptionPeer));
+    const esp_err_t encryptionResult =
+        esp_ble_set_encryption(encryptionPeer, ESP_BLE_SEC_ENCRYPT_MITM);
+
     char message[DiagnosticsService::kAsyncMessageCapacity];
     std::snprintf(message, sizeof(message),
-                  "BLE connect addr=%s type=%u bonds=%d awaiting encryption", addressText,
-                  peerAddressType, bondCount);
+                  "BLE connect addr=%s type=%u bonds=%d encryption-request=0x%x",
+                  addressText, peerAddressType, bondCount,
+                  static_cast<unsigned>(encryptionResult));
     logAsync(message);
 }
 
@@ -323,12 +350,16 @@ void BleKeyboardService::handleAuthentication(bool success, uint8_t reason, uint
     if (!success) {
         encrypted_.store(false);
         error_.store(BleKeyboardError::AuthenticationFailed);
+        const bool bondAfterFailure = hasStoredBond();
         char addressText[18];
         formatAddress(addressText, sizeof(addressText), peerAddress);
         char message[DiagnosticsService::kAsyncMessageCapacity];
         std::snprintf(message, sizeof(message),
-                      "BLE auth failed addr=%s type=%u reason=0x%02x auth=0x%02x",
-                      addressText, peerAddressType, reason, authMode);
+                      "BLE auth failed addr=%s type=%u reason=0x%02x(%s) auth=0x%02x "
+                      "bond-before=%d bond-after=%d",
+                      addressText, peerAddressType, reason,
+                      authenticationFailureName(reason), authMode,
+                      bondedAtConnect_.load() ? 1 : 0, bondAfterFailure ? 1 : 0);
         logAsync(message);
         if (server_ != nullptr && connected_.load()) {
             server_->disconnect(connectionId_.load());
