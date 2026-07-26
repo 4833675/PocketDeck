@@ -1,18 +1,11 @@
 #include "services/ble_keyboard_service.h"
 
-#include <algorithm>
-#include <array>
 #include <cstdio>
 #include <cstring>
 
 #include <Arduino.h>
-#include <BLE2902.h>
-#include <BLEAdvertising.h>
-#include <BLEDevice.h>
-#include <BLEHIDDevice.h>
-#include <BLESecurity.h>
-#include <BLEServer.h>
-#include <esp_gap_ble_api.h>
+#include <NimBLEDevice.h>
+#include <NimBLEHIDDevice.h>
 #include <esp_system.h>
 
 #include "services/diagnostics_service.h"
@@ -56,115 +49,121 @@ constexpr uint8_t kKeyboardReportMap[] = {
     0xC0,              // End Collection
 };
 
-void formatAddress(char* output, size_t outputSize, const uint8_t* address) {
+void formatNativeAddress(char* output, size_t outputSize, const uint8_t* address) {
     if (address == nullptr) {
         std::snprintf(output, outputSize, "--:--:--:--:--:--");
         return;
     }
-    std::snprintf(output, outputSize, "%02X:%02X:%02X:%02X:%02X:%02X", address[0],
-                  address[1], address[2], address[3], address[4], address[5]);
+
+    // NimBLE stores native BLE addresses least-significant byte first.
+    std::snprintf(output, outputSize, "%02X:%02X:%02X:%02X:%02X:%02X", address[5],
+                  address[4], address[3], address[2], address[1], address[0]);
 }
 
-const char* authenticationFailureName(uint8_t reason) {
-    switch (reason) {
-        case 0x05: return "hci-auth-failure";
-        case 0x06: return "hci-key-missing";
-        case 0x50: return "smp-auth-failure";
-        case 0x51: return "smp-confirm-failure";
-        case 0x52: return "smp-not-supported";
-        case 0x56: return "smp-repeated-attempts";
-        case 0x61: return "smp-encryption-failure";
-        case 0x63: return "smp-response-timeout";
-        case 0x66: return "smp-connection-timeout";
-        default: return "unknown";
-    }
+NimBLEAddress nativeAddress(const uint8_t* address, uint8_t addressType) {
+    ble_addr_t value{};
+    if (address != nullptr) std::memcpy(value.val, address, sizeof(value.val));
+    value.type = addressType;
+    return NimBLEAddress(value);
 }
 
 }  // namespace
 
-class BleKeyboardService::ServerCallbacks final : public BLEServerCallbacks {
+BleKeyboardService* BleKeyboardService::activeInstance_ = nullptr;
+
+class BleKeyboardService::ServerCallbacks final : public NimBLEServerCallbacks {
 public:
     explicit ServerCallbacks(BleKeyboardService& owner) : owner_(owner) {}
 
-    void onConnect(BLEServer*, esp_ble_gatts_cb_param_t* param) override {
-        owner_.handleConnect(param->connect.conn_id, param->connect.remote_bda,
-                             static_cast<uint8_t>(param->connect.ble_addr_type));
+    void onConnect(NimBLEServer*, ble_gap_conn_desc* description) override {
+        if (description == nullptr) return;
+        owner_.handleConnect(description->conn_handle, description->peer_ota_addr.val,
+                             description->peer_ota_addr.type,
+                             description->peer_id_addr.val,
+                             description->peer_id_addr.type);
     }
 
-    void onDisconnect(BLEServer*, esp_ble_gatts_cb_param_t* param) override {
-        const uint8_t reason = param != nullptr
-                                   ? static_cast<uint8_t>(param->disconnect.reason)
-                                   : 0xFF;
-        owner_.handleDisconnect(reason);
+    void onDisconnect(NimBLEServer*, ble_gap_conn_desc*) override {
+        owner_.handleDisconnect(owner_.pendingDisconnectReason_.exchange(-1));
     }
-
-private:
-    BleKeyboardService& owner_;
-};
-
-class BleKeyboardService::SecurityCallbacks final : public BLESecurityCallbacks {
-public:
-    explicit SecurityCallbacks(BleKeyboardService& owner) : owner_(owner) {}
 
     uint32_t onPassKeyRequest() override {
         if (!owner_.allowNewPairing("passkey request")) return 0;
         return owner_.passkey_.load();
     }
-    void onPassKeyNotify(uint32_t passkey) override {
-        owner_.handlePasskeyNotification(passkey);
-    }
-    bool onSecurityRequest() override { return true; }
+
     bool onConfirmPIN(uint32_t) override {
         return owner_.allowNewPairing("numeric comparison");
     }
 
-    void onAuthenticationComplete(esp_ble_auth_cmpl_t result) override {
-        owner_.handleAuthentication(result.success, result.fail_reason,
-                                    static_cast<uint8_t>(result.auth_mode),
-                                    result.key_present, result.bd_addr,
-                                    static_cast<uint8_t>(result.addr_type));
+    void onAuthenticationComplete(ble_gap_conn_desc* description) override {
+        if (description == nullptr) return;
+        owner_.handleAuthentication(description->sec_state.encrypted,
+                                    description->sec_state.authenticated,
+                                    description->sec_state.bonded,
+                                    description->peer_id_addr.val,
+                                    description->peer_id_addr.type);
     }
 
 private:
     BleKeyboardService& owner_;
 };
 
+int BleKeyboardService::handleGapEvent(ble_gap_event* event, void*) {
+    BleKeyboardService* instance = activeInstance_;
+    if (instance == nullptr || event == nullptr) return 0;
+
+    // NimBLE's public server disconnect callback omits the reason, and its
+    // authentication callback omits the security status. A GAP listener sees
+    // each event immediately before those callbacks, so retain the diagnostic
+    // values without changing NimBLE's handling of the event.
+    if (event->type == BLE_GAP_EVENT_DISCONNECT) {
+        instance->pendingDisconnectReason_.store(event->disconnect.reason);
+    } else if (event->type == BLE_GAP_EVENT_ENC_CHANGE) {
+        instance->pendingSecurityStatus_.store(event->enc_change.status);
+    }
+    return 0;
+}
+
 bool BleKeyboardService::begin(const char* deviceName) {
     if (initialized_.load()) return true;
 
     generatePasskey();
-    BLEDevice::init(deviceName);
-    BLEDevice::setEncryptionLevel(ESP_BLE_SEC_ENCRYPT_MITM);
+    NimBLEDevice::init(deviceName);
+    NimBLEDevice::setSecurityAuth(true, true, true);
+    NimBLEDevice::setSecurityPasskey(passkey_.load());
+    NimBLEDevice::setSecurityIOCap(BLE_HS_IO_DISPLAY_ONLY);
+    NimBLEDevice::setSecurityInitKey(BLE_SM_PAIR_KEY_DIST_ENC |
+                                     BLE_SM_PAIR_KEY_DIST_ID);
+    NimBLEDevice::setSecurityRespKey(BLE_SM_PAIR_KEY_DIST_ENC |
+                                     BLE_SM_PAIR_KEY_DIST_ID);
+
+    activeInstance_ = this;
+    NimBLEDevice::setCustomGapHandler(&BleKeyboardService::handleGapEvent);
     bonded_.store(hasStoredBond());
-    server_ = BLEDevice::createServer();
+
+    server_ = NimBLEDevice::createServer();
     if (server_ == nullptr) {
+        activeInstance_ = nullptr;
         error_.store(BleKeyboardError::InitializationFailed);
         return false;
     }
 
     serverCallbacks_ = new ServerCallbacks(*this);
-    securityCallbacks_ = new SecurityCallbacks(*this);
     server_->setCallbacks(serverCallbacks_);
-    BLEDevice::setSecurityCallbacks(securityCallbacks_);
+    server_->advertiseOnDisconnect(false);
 
-    hid_ = new BLEHIDDevice(server_);
+    hid_ = new NimBLEHIDDevice(server_);
     inputReport_ = hid_->inputReport(1);
     outputReport_ = hid_->outputReport(1);
     hid_->manufacturer()->setValue("Pocket Deck");
     hid_->pnp(0x02, 0x303A, 0x4001, 0x0100);
     hid_->hidInfo(0x00, 0x01);
-    hid_->reportMap(const_cast<uint8_t*>(kKeyboardReportMap), sizeof(kKeyboardReportMap));
+    hid_->reportMap(const_cast<uint8_t*>(kKeyboardReportMap),
+                    sizeof(kKeyboardReportMap));
     hid_->startServices();
 
-    security_ = new BLESecurity();
-    security_->setStaticPIN(passkey_.load());
-    security_->setCapability(ESP_IO_CAP_OUT);
-    security_->setKeySize(16);
-    security_->setInitEncryptionKey(ESP_BLE_ENC_KEY_MASK | ESP_BLE_ID_KEY_MASK);
-    security_->setRespEncryptionKey(ESP_BLE_ENC_KEY_MASK | ESP_BLE_ID_KEY_MASK);
-    security_->setAuthenticationMode(ESP_LE_AUTH_REQ_SC_MITM_BOND);
-
-    auto* advertising = BLEDevice::getAdvertising();
+    auto* advertising = NimBLEDevice::getAdvertising();
     advertising->setAppearance(HID_KEYBOARD);
     advertising->addServiceUUID(hid_->hidService()->getUUID());
     advertising->setScanResponse(true);
@@ -175,7 +174,7 @@ bool BleKeyboardService::begin(const char* deviceName) {
     error_.store(BleKeyboardError::None);
     if (enabled_.load()) startAdvertising();
     char message[64];
-    std::snprintf(message, sizeof(message), "BLE HID ready, bonded=%d",
+    std::snprintf(message, sizeof(message), "BLE HID ready (NimBLE), bonded=%d",
                   bonded_.load() ? 1 : 0);
     logNow(message);
     return true;
@@ -195,7 +194,7 @@ void BleKeyboardService::setEnabled(bool enabled) {
     if (!enabled) {
         advertisingPending_.store(false);
         disconnect();
-        BLEDevice::getAdvertising()->stop();
+        NimBLEDevice::stopAdvertising();
         reportPolicy_.setConnected(false);
         return;
     }
@@ -224,7 +223,9 @@ void BleKeyboardService::updateBattery(uint8_t percent) {
 }
 
 void BleKeyboardService::disconnect() {
-    if (server_ != nullptr && connected_.load()) server_->disconnect(connectionId_.load());
+    if (server_ != nullptr && connected_.load()) {
+        server_->disconnect(connectionId_.load());
+    }
     connected_.store(false);
     encrypted_.store(false);
     reportPolicy_.setConnected(false);
@@ -232,32 +233,17 @@ void BleKeyboardService::disconnect() {
 
 bool BleKeyboardService::forgetHost() {
     disconnect();
-    int count = esp_ble_get_bond_device_num();
-    if (count < 0) {
+    NimBLEDevice::deleteAllBonds();
+    if (NimBLEDevice::getNumBonds() != 0) {
         error_.store(BleKeyboardError::BondOperationFailed);
         return false;
-    }
-
-    std::array<esp_ble_bond_dev_t, 8> devices{};
-    int listed = std::min<int>(count, devices.size());
-    if (listed > 0 && esp_ble_get_bond_device_list(&listed, devices.data()) != ESP_OK) {
-        error_.store(BleKeyboardError::BondOperationFailed);
-        return false;
-    }
-    for (int index = 0; index < listed; ++index) {
-        if (esp_ble_remove_bond_device(devices[index].bd_addr) != ESP_OK) {
-            error_.store(BleKeyboardError::BondOperationFailed);
-            return false;
-        }
     }
 
     bonded_.store(false);
+    bondedAtConnect_.store(false);
     error_.store(BleKeyboardError::None);
     generatePasskey();
-    if (security_ != nullptr) {
-        security_->setStaticPIN(passkey_.load());
-        security_->setAuthenticationMode(ESP_LE_AUTH_REQ_SC_MITM_BOND);
-    }
+    NimBLEDevice::setSecurityPasskey(passkey_.load());
     requestAdvertising(350);
     logNow("BLE host bond cleared");
     return true;
@@ -299,42 +285,70 @@ const char* BleKeyboardService::errorText() const {
 }
 
 void BleKeyboardService::handleConnect(uint16_t connectionId, const uint8_t* peerAddress,
-                                       uint8_t peerAddressType) {
+                                       uint8_t peerAddressType,
+                                       const uint8_t* peerIdentityAddress,
+                                       uint8_t peerIdentityAddressType) {
     advertisingPending_.store(false);
-    const int bondCount = esp_ble_get_bond_device_num();
-    bondedAtConnect_.store(bondCount > 0);
+    pendingDisconnectReason_.store(-1);
+    pendingSecurityStatus_.store(0);
+
+    const int bondCount = NimBLEDevice::getNumBonds();
+    const bool hasBond = bondCount > 0;
+    const bool knownPeer = hasBond &&
+                           NimBLEDevice::isBonded(
+                               nativeAddress(peerIdentityAddress, peerIdentityAddressType));
+    bondedAtConnect_.store(hasBond);
     pairingRejected_.store(false);
     connectionId_.store(connectionId);
     connected_.store(true);
     encrypted_.store(false);
     error_.store(BleKeyboardError::None);
-    char addressText[18];
-    formatAddress(addressText, sizeof(addressText), peerAddress);
 
-    // Start security immediately. In ESP-IDF 4.4.7, leaving a bonded HID link
-    // waiting for the peer to initiate SMP can end in SMP_CONN_TOUT; Bluedroid
-    // then removes the saved bonding keys. The official secure GATT server uses
-    // this same explicit encryption request from its connection callback.
-    esp_bd_addr_t encryptionPeer{};
-    std::memcpy(encryptionPeer, peerAddress, sizeof(encryptionPeer));
-    const esp_err_t encryptionResult =
-        esp_ble_set_encryption(encryptionPeer, ESP_BLE_SEC_ENCRYPT_MITM);
+    char peerText[18];
+    char identityText[18];
+    formatNativeAddress(peerText, sizeof(peerText), peerAddress);
+    formatNativeAddress(identityText, sizeof(identityText), peerIdentityAddress);
 
+    // Enforce the single-host policy before an unknown central can start a new
+    // pairing procedure. For a known Mac, NimBLE has already resolved an RPA to
+    // the stored identity address by the time this callback runs.
+    if (hasBond && !knownPeer) {
+        pairingRejected_.store(true);
+        error_.store(BleKeyboardError::UnauthorizedPeer);
+        char message[DiagnosticsService::kAsyncMessageCapacity];
+        std::snprintf(message, sizeof(message),
+                      "BLE rejected addr=%s/%u id=%s/%u; stored host differs",
+                      peerText, peerAddressType, identityText,
+                      peerIdentityAddressType);
+        logAsync(message);
+        if (server_ != nullptr) server_->disconnect(connectionId);
+        return;
+    }
+
+    // Explicitly begin link security for both first pairing and bonded
+    // reconnects. Unlike the old Bluedroid host, NimBLE keeps the stored bond
+    // when a marginal connection times out during this procedure.
+    const int securityResult = NimBLEDevice::startSecurity(connectionId);
     char message[DiagnosticsService::kAsyncMessageCapacity];
     std::snprintf(message, sizeof(message),
-                  "BLE connect addr=%s type=%u bonds=%d encryption-request=0x%x",
-                  addressText, peerAddressType, bondCount,
-                  static_cast<unsigned>(encryptionResult));
+                  "BLE connect addr=%s/%u id=%s/%u bonds=%d known=%d security=%d",
+                  peerText, peerAddressType, identityText, peerIdentityAddressType,
+                  bondCount, knownPeer ? 1 : 0, securityResult);
     logAsync(message);
 }
 
-void BleKeyboardService::handleDisconnect(uint8_t reason) {
+void BleKeyboardService::handleDisconnect(int reason) {
     connected_.store(false);
     encrypted_.store(false);
-    lastDisconnectReason_.store(reason);
+    const uint8_t compactReason =
+        reason >= 0 ? static_cast<uint8_t>(reason & 0xFF) : 0xFF;
+    lastDisconnectReason_.store(compactReason);
     reportPolicy_.setConnected(false);
-    char message[80];
-    std::snprintf(message, sizeof(message), "BLE disconnect reason=0x%02x", reason);
+
+    char message[DiagnosticsService::kAsyncMessageCapacity];
+    std::snprintf(message, sizeof(message), "BLE disconnect reason=0x%x (%s)",
+                  reason, reason >= 0 ? NimBLEUtils::returnCodeToString(reason)
+                                      : "not reported");
     logAsync(message);
     const BleKeyboardError currentError = error_.load();
     if (currentError == BleKeyboardError::UnauthorizedPeer ||
@@ -344,22 +358,28 @@ void BleKeyboardService::handleDisconnect(uint8_t reason) {
     requestAdvertising(350);
 }
 
-void BleKeyboardService::handleAuthentication(bool success, uint8_t reason, uint8_t authMode,
-                                              bool keyPresent, const uint8_t* peerAddress,
-                                              uint8_t peerAddressType) {
-    if (!success) {
+void BleKeyboardService::handleAuthentication(bool encrypted, bool authenticated,
+                                              bool linkBonded,
+                                              const uint8_t* peerIdentityAddress,
+                                              uint8_t peerIdentityAddressType) {
+    const int securityStatus = pendingSecurityStatus_.exchange(0);
+    char identityText[18];
+    formatNativeAddress(identityText, sizeof(identityText), peerIdentityAddress);
+
+    if (!encrypted || !authenticated) {
         encrypted_.store(false);
-        error_.store(BleKeyboardError::AuthenticationFailed);
+        if (!pairingRejected_.load()) {
+            error_.store(BleKeyboardError::AuthenticationFailed);
+        }
         const bool bondAfterFailure = hasStoredBond();
-        char addressText[18];
-        formatAddress(addressText, sizeof(addressText), peerAddress);
         char message[DiagnosticsService::kAsyncMessageCapacity];
         std::snprintf(message, sizeof(message),
-                      "BLE auth failed addr=%s type=%u reason=0x%02x(%s) auth=0x%02x "
+                      "BLE security failed id=%s/%u status=0x%x(%s) enc=%d auth=%d "
                       "bond-before=%d bond-after=%d",
-                      addressText, peerAddressType, reason,
-                      authenticationFailureName(reason), authMode,
-                      bondedAtConnect_.load() ? 1 : 0, bondAfterFailure ? 1 : 0);
+                      identityText, peerIdentityAddressType, securityStatus,
+                      NimBLEUtils::returnCodeToString(securityStatus), encrypted ? 1 : 0,
+                      authenticated ? 1 : 0, bondedAtConnect_.load() ? 1 : 0,
+                      bondAfterFailure ? 1 : 0);
         logAsync(message);
         if (server_ != nullptr && connected_.load()) {
             server_->disconnect(connectionId_.load());
@@ -368,7 +388,7 @@ void BleKeyboardService::handleAuthentication(bool success, uint8_t reason, uint
     }
 
     if (pairingRejected_.load()) {
-        logAsync("BLE auth ignored after rejected pairing");
+        logAsync("BLE security ignored after rejected pairing");
         if (server_ != nullptr && connected_.load()) {
             server_->disconnect(connectionId_.load());
         }
@@ -379,12 +399,11 @@ void BleKeyboardService::handleAuthentication(bool success, uint8_t reason, uint
     encrypted_.store(true);
     bonded_.store(bondStored);
     error_.store(BleKeyboardError::None);
-    char addressText[18];
-    formatAddress(addressText, sizeof(addressText), peerAddress);
     char message[DiagnosticsService::kAsyncMessageCapacity];
     std::snprintf(message, sizeof(message),
-                  "BLE encrypted addr=%s type=%u bond=%d auth=0x%02x key=%d", addressText,
-                  peerAddressType, bondStored ? 1 : 0, authMode, keyPresent ? 1 : 0);
+                  "BLE encrypted id=%s/%u stored=%d link-bond=%d auth=%d status=0x%x",
+                  identityText, peerIdentityAddressType, bondStored ? 1 : 0,
+                  linkBonded ? 1 : 0, authenticated ? 1 : 0, securityStatus);
     logAsync(message);
 }
 
@@ -403,15 +422,13 @@ bool BleKeyboardService::allowNewPairing(const char* eventName) {
     return false;
 }
 
-void BleKeyboardService::handlePasskeyNotification(uint32_t passkey) {
-    if (!allowNewPairing("passkey notification")) return;
-    passkey_.store(passkey);
-}
-
 void BleKeyboardService::startAdvertising() {
     if (!initialized_.load() || !enabled_.load() || connected_.load()) return;
-    BLEDevice::startAdvertising();
-    logNow("BLE advertising start requested");
+    const bool started = NimBLEDevice::startAdvertising();
+    char message[72];
+    std::snprintf(message, sizeof(message), "BLE advertising start requested result=%d",
+                  started ? 1 : 0);
+    logNow(message);
 }
 
 void BleKeyboardService::requestAdvertising(uint32_t delayMs) {
@@ -438,7 +455,7 @@ void BleKeyboardService::generatePasskey() {
 }
 
 bool BleKeyboardService::hasStoredBond() const {
-    return esp_ble_get_bond_device_num() > 0;
+    return NimBLEDevice::getNumBonds() > 0;
 }
 
 }  // namespace pd

@@ -5,10 +5,11 @@
 
 #include "core/ble_keyboard_policy.h"
 
-class BLECharacteristic;
-class BLEHIDDevice;
-class BLESecurity;
-class BLEServer;
+struct ble_gap_event;
+
+class NimBLECharacteristic;
+class NimBLEHIDDevice;
+class NimBLEServer;
 
 namespace pd {
 
@@ -61,19 +62,18 @@ public:
 
 private:
     class ServerCallbacks;
-    class SecurityCallbacks;
 
     friend class ServerCallbacks;
-    friend class SecurityCallbacks;
 
+    static int handleGapEvent(ble_gap_event* event, void* argument);
     void handleConnect(uint16_t connectionId, const uint8_t* peerAddress,
-                       uint8_t peerAddressType);
-    void handleDisconnect(uint8_t reason);
-    void handleAuthentication(bool success, uint8_t reason, uint8_t authMode,
-                              bool keyPresent, const uint8_t* peerAddress,
-                              uint8_t peerAddressType);
+                       uint8_t peerAddressType, const uint8_t* peerIdentityAddress,
+                       uint8_t peerIdentityAddressType);
+    void handleDisconnect(int reason);
+    void handleAuthentication(bool encrypted, bool authenticated, bool linkBonded,
+                              const uint8_t* peerIdentityAddress,
+                              uint8_t peerIdentityAddressType);
     bool allowNewPairing(const char* eventName);
-    void handlePasskeyNotification(uint32_t passkey);
     void startAdvertising();
     void requestAdvertising(uint32_t delayMs);
     void logNow(const char* message);
@@ -81,13 +81,13 @@ private:
     void generatePasskey();
     bool hasStoredBond() const;
 
-    BLEServer* server_ = nullptr;
-    BLEHIDDevice* hid_ = nullptr;
-    BLECharacteristic* inputReport_ = nullptr;
-    BLECharacteristic* outputReport_ = nullptr;
-    BLESecurity* security_ = nullptr;
+    static BleKeyboardService* activeInstance_;
+
+    NimBLEServer* server_ = nullptr;
+    NimBLEHIDDevice* hid_ = nullptr;
+    NimBLECharacteristic* inputReport_ = nullptr;
+    NimBLECharacteristic* outputReport_ = nullptr;
     ServerCallbacks* serverCallbacks_ = nullptr;
-    SecurityCallbacks* securityCallbacks_ = nullptr;
     DiagnosticsService* diagnostics_ = nullptr;
     BleKeyboardPolicy reportPolicy_;
     std::atomic<bool> initialized_{false};
@@ -101,6 +101,8 @@ private:
     std::atomic<uint32_t> advertisingDueMs_{0};
     std::atomic<uint16_t> connectionId_{0};
     std::atomic<uint32_t> passkey_{0};
+    std::atomic<int> pendingDisconnectReason_{-1};
+    std::atomic<int> pendingSecurityStatus_{0};
     std::atomic<uint8_t> lastDisconnectReason_{0};
     std::atomic<BleKeyboardError> error_{BleKeyboardError::None};
     uint8_t lastBattery_ = 255;
