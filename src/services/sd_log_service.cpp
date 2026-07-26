@@ -17,7 +17,12 @@ constexpr int8_t kSdSckPin = 40;
 constexpr int8_t kSdMisoPin = 39;
 constexpr int8_t kSdMosiPin = 14;
 constexpr int8_t kSdCsPin = 12;
-constexpr uint32_t kSdFrequency = 25000000;
+// Cap LoRa-1262 shares SCK/MOSI/MISO with the Cardputer microSD slot. Its
+// SX1262 NSS must stay high while the SD card is being initialized, otherwise
+// both peripherals can drive the bus at once.
+constexpr int8_t kSharedLoraCsPin = 5;
+// Log throughput is tiny; favor signal margin and broad SDXC compatibility.
+constexpr uint32_t kSdFrequency = 4000000;
 constexpr uint32_t kRotateBytes = 512u * 1024u;
 constexpr const char* kPreviousLogPath = "/PocketDeck/ble-prev.log";
 constexpr std::time_t kPlausibleEpoch = 1704067200;  // 2024-01-01 UTC
@@ -65,7 +70,9 @@ bool SdLogService::beginSession(const char* firmwareVersion, const char* resetRe
     std::snprintf(message, sizeof(message), "=== Pocket Deck v%s boot reset=%s ===",
                   firmwareVersion != nullptr ? firmwareVersion : "?",
                   resetReason != nullptr ? resetReason : "unknown");
-    return append(message);
+    const bool started = append(message);
+    Serial.printf("[sd] log %s path=%s\n", started ? "active" : "open failed", kLogPath);
+    return started;
 }
 
 bool SdLogService::append(const char* message) {
@@ -120,9 +127,16 @@ bool SdLogService::mount(bool formatIfMissing) {
     snapshot_.error.fill('\0');
     snapshot_.state = SdLogState::Unavailable;
 
+    pinMode(kSharedLoraCsPin, OUTPUT);
+    digitalWrite(kSharedLoraCsPin, HIGH);
+    pinMode(kSdCsPin, OUTPUT);
+    digitalWrite(kSdCsPin, HIGH);
+    delay(2);
     SPI.begin(kSdSckPin, kSdMisoPin, kSdMosiPin, kSdCsPin);
+    Serial.printf("[sd] mount format=%d freq=%lu LoRaCS=HIGH\n", formatIfMissing ? 1 : 0,
+                  static_cast<unsigned long>(kSdFrequency));
     if (!SD.begin(kSdCsPin, SPI, kSdFrequency, "/sd", 5, formatIfMissing)) {
-        setError(formatIfMissing ? "No card or format failed" : "No FAT card mounted",
+        setError(formatIfMissing ? "SD init/format failed" : "SD SPI init failed",
                  SdLogState::Unavailable);
         return false;
     }
@@ -134,6 +148,8 @@ bool SdLogService::mount(bool formatIfMissing) {
 
     snapshot_.mounted = true;
     snapshot_.cardBytes = SD.cardSize();
+    Serial.printf("[sd] mounted type=%u size=%lluMB\n", static_cast<unsigned>(SD.cardType()),
+                  static_cast<unsigned long long>(snapshot_.cardBytes / (1024u * 1024u)));
     if (!ensureDirectory()) {
         setError("Could not create log folder");
         return false;
@@ -222,6 +238,7 @@ void SdLogService::setError(const char* message, SdLogState state) {
     if (message != nullptr) {
         std::strncpy(snapshot_.error.data(), message, snapshot_.error.size() - 1);
     }
+    Serial.printf("[sd] error: %s\n", snapshot_.error.data());
     ready_ = false;
 }
 

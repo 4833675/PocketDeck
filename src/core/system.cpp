@@ -69,8 +69,8 @@ void System::begin() {
     diagnostics_.logf("Board init: Cardputer ADV=%d", detected ? 1 : 0);
     board_.setBrightness(settings_.brightness);
     board_.setVolume(settings_.volume);
-    const bool sdReady = sdLog_.begin();
-    if (sdReady) sdLog_.beginSession(config::kFirmwareVersion, context_.resetReason);
+    bool sdReady = sdLog_.begin();
+    if (sdReady) sdReady = sdLog_.beginSession(config::kFirmwareVersion, context_.resetReason);
     diagnostics_.setSink(&SdLogService::diagnosticsSink, &sdLog_, true);
     diagnostics_.logf("TF logging: %s", sdReady ? "ready /PocketDeck/ble.log"
                                                 : "unavailable");
@@ -236,18 +236,22 @@ void System::handleSystemCommand(SystemCommand command) {
             return;
         }
         case SystemCommand::MountStorage: {
-            const bool mounted = sdLog_.remount();
-            if (mounted) sdLog_.beginSession(config::kFirmwareVersion, context_.resetReason);
-            diagnostics_.log(mounted ? "TF card mounted; logging active"
-                                     : "TF card mount failed");
+            bool logging = sdLog_.remount();
+            if (logging) {
+                logging = sdLog_.beginSession(config::kFirmwareVersion, context_.resetReason);
+            }
+            diagnostics_.log(logging ? "TF card mounted; logging active"
+                                     : "TF card mount/log failed");
             return;
         }
         case SystemCommand::FormatStorage: {
             diagnostics_.log("TF card format confirmed");
-            const bool formatted = sdLog_.formatCard();
-            if (formatted) sdLog_.beginSession(config::kFirmwareVersion, context_.resetReason);
-            diagnostics_.log(formatted ? "TF card formatted; logging active"
-                                       : "TF card format failed");
+            bool logging = sdLog_.formatCard();
+            if (logging) {
+                logging = sdLog_.beginSession(config::kFirmwareVersion, context_.resetReason);
+            }
+            diagnostics_.log(logging ? "TF card formatted; logging active"
+                                     : "TF card format/log failed");
             return;
         }
         case SystemCommand::Restart:

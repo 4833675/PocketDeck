@@ -163,6 +163,8 @@ modifier byte; larger chords produce the standard HID rollover report.
 Pocket Deck can persist system and detailed BLE lifecycle events to the built-in
 microSD slot. Insert a FAT-formatted card with its contacts facing away from the
 screen, then boot the device. Logging starts automatically when the card mounts.
+The SD bus is initialized conservatively and keeps the optional Cap LoRa-1262
+chip-select inactive because that accessory shares the same SPI data pins.
 
 Open Settings > System > TF card logs to see card status. `Mount / retry` handles
 a card inserted after boot. `Format TF card` requires a separate confirmation
