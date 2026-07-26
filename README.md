@@ -8,11 +8,11 @@ The Bluetooth keyboard and system shell run on the Cardputer Adv alone. The GPS
 dashboard and GPS-local weather additionally require the optional **M5Stack Cap
 LoRa-1262**, which contains the supported GNSS receiver.
 
-The current `0.3.1` firmware contains a Graphite Mint system shell, launcher,
+The current `0.3.2` firmware contains a Graphite Mint system shell, launcher,
 secure single-host Bluetooth LE keyboard for macOS, a live GNSS/GPS app for the
 Cap LoRa-1262, Wi-Fi scanning and connection, NTP time, GPS-local weather,
-Bluetooth/Wi-Fi/System settings, Quick Settings, persistent preferences, and
-on-device diagnostics.
+Bluetooth/Wi-Fi/System settings, Quick Settings, persistent preferences,
+on-device diagnostics, and optional persistent BLE diagnostics on microSD.
 
 Hardware validation procedures are kept under [`docs/validation/`](docs/validation/).
 
@@ -157,6 +157,23 @@ use standard US keyboard HID usages. The local Fn layer adds:
 Without Fn, `` ` ``, `;`, `,`, `.`, and `/` remain ordinary punctuation.
 Reports support the standard six simultaneous non-modifier keys plus the
 modifier byte; larger chords produce the standard HID rollover report.
+
+## TF card diagnostic logging
+
+Pocket Deck can persist system and detailed BLE lifecycle events to the built-in
+microSD slot. Insert a FAT-formatted card with its contacts facing away from the
+screen, then boot the device. Logging starts automatically when the card mounts.
+
+Open Settings > System > TF card logs to see card status. `Mount / retry` handles
+a card inserted after boot. `Format TF card` requires a separate confirmation
+screen and erases all data on the card; it can also prepare a card that does not
+yet contain a filesystem supported by the firmware.
+
+The active file is `/PocketDeck/ble.log`. At 512 KB it rotates to
+`/PocketDeck/ble-prev.log`, keeping storage bounded. Every event is flushed and
+closed immediately so an unexpected shutdown does not lose a buffered session.
+Lines contain UTC after NTP synchronization and always contain device uptime.
+Power Pocket Deck off before removing the card to read it on another computer.
 
 ## GPS / GNSS
 

@@ -12,6 +12,7 @@
 #include "pocket_deck_config.h"
 #include "services/ble_keyboard_service.h"
 #include "services/diagnostics_service.h"
+#include "services/sd_log_service.h"
 #include "services/wifi_service.h"
 #include "ui/status_bar.h"
 #include "ui/theme.h"
@@ -34,6 +35,22 @@ uint16_t wifiStateColor(const WifiSnapshot& wifi) {
     if (!wifi.enabled || wifi.state == WifiState::Disabled) return theme::kError;
     if (wifi.connected) return theme::kPrimary;
     if (wifi.state == WifiState::Error) return theme::kError;
+    return theme::kWarning;
+}
+
+const char* sdStateLabel(SdLogState state) {
+    switch (state) {
+        case SdLogState::Unavailable: return "UNAVAILABLE";
+        case SdLogState::Ready: return "LOGGING";
+        case SdLogState::Formatting: return "FORMATTING";
+        case SdLogState::Error: return "ERROR";
+    }
+    return "UNKNOWN";
+}
+
+uint16_t sdStateColor(SdLogState state) {
+    if (state == SdLogState::Ready) return theme::kPrimary;
+    if (state == SdLogState::Error) return theme::kError;
     return theme::kWarning;
 }
 
@@ -289,27 +306,67 @@ void drawBluetooth(M5Canvas& canvas, const SettingsModel& model,
 }
 
 void drawSystem(M5Canvas& canvas, const SettingsModel& model, const SystemContext& context) {
-    drawChoice(canvas, 27, "Diagnostics", model.selectedRow() == 0);
-    drawChoice(canvas, 50, "Restart", model.selectedRow() == 1);
-    drawChoice(canvas, 73, "Factory reset", model.selectedRow() == 2);
+    drawChoice(canvas, 20, "Diagnostics", model.selectedRow() == 0);
+    drawChoice(canvas, 42, "TF card logs", model.selectedRow() == 1);
+    drawChoice(canvas, 64, "Restart", model.selectedRow() == 2);
+    drawChoice(canvas, 86, "Factory reset", model.selectedRow() == 3);
 
     canvas.setTextDatum(top_left);
     canvas.setTextColor(theme::kText, theme::kBackground);
     char line[48];
     std::snprintf(line, sizeof(line), "v%s", config::kFirmwareVersion);
-    canvas.drawString(line, 121, 29);
+    canvas.drawString(line, 121, 21);
     std::snprintf(line, sizeof(line), "Up %lus",
                   static_cast<unsigned long>(context.uptimeMs / 1000u));
-    canvas.drawString(line, 121, 45);
+    canvas.drawString(line, 121, 38);
+    const SdLogSnapshot storage = context.sdLog != nullptr ? context.sdLog->snapshot()
+                                                           : SdLogSnapshot{};
+    canvas.setTextColor(sdStateColor(storage.state), theme::kBackground);
+    std::snprintf(line, sizeof(line), "TF %s", sdStateLabel(storage.state));
+    canvas.drawString(line, 121, 55);
+    canvas.setTextColor(theme::kText, theme::kBackground);
     std::snprintf(line, sizeof(line), "Heap %lu KB",
                   static_cast<unsigned long>(context.freeHeap / 1024u));
-    canvas.drawString(line, 121, 61);
+    canvas.drawString(line, 121, 72);
     std::snprintf(line, sizeof(line), "Min  %lu KB",
                   static_cast<unsigned long>(context.minimumFreeHeap / 1024u));
-    canvas.drawString(line, 121, 77);
+    canvas.drawString(line, 121, 89);
     canvas.setTextColor(theme::kMuted, theme::kBackground);
-    canvas.drawString(context.resetReason, 121, 94);
+    canvas.drawString(context.resetReason, 121, 104);
     drawHint(canvas, "FN+;/. MOVE   ENTER SELECT   DEL BACK");
+}
+
+void drawStorage(M5Canvas& canvas, const SettingsModel& model,
+                 const SystemContext& context) {
+    drawChoice(canvas, 28, "Mount / retry", model.selectedRow() == 0);
+    drawChoice(canvas, 54, "Format TF card", model.selectedRow() == 1);
+
+    const SdLogSnapshot storage = context.sdLog != nullptr ? context.sdLog->snapshot()
+                                                           : SdLogSnapshot{};
+    canvas.setTextDatum(top_left);
+    canvas.setTextColor(sdStateColor(storage.state), theme::kBackground);
+    canvas.drawString(sdStateLabel(storage.state), 121, 29);
+
+    char line[52];
+    canvas.setTextColor(theme::kText, theme::kBackground);
+    if (storage.cardBytes > 0) {
+        std::snprintf(line, sizeof(line), "Size %llu MB",
+                      static_cast<unsigned long long>(storage.cardBytes / (1024u * 1024u)));
+    } else {
+        std::snprintf(line, sizeof(line), "Size --");
+    }
+    canvas.drawString(line, 121, 47);
+    std::snprintf(line, sizeof(line), "Lines %lu",
+                  static_cast<unsigned long>(storage.linesWritten));
+    canvas.drawString(line, 121, 64);
+    canvas.setTextColor(theme::kMuted, theme::kBackground);
+    canvas.drawString("/PocketDeck/", 121, 81);
+    canvas.drawString("ble.log", 121, 96);
+    if (storage.state != SdLogState::Ready && storage.error[0] != '\0') {
+        canvas.setTextColor(theme::kWarning, theme::kBackground);
+        canvas.drawString(storage.error.data(), 7, 103);
+    }
+    drawHint(canvas, "FORMAT ERASES CARD   ENTER SELECT   DEL BACK");
 }
 
 void drawDiagnostics(M5Canvas& canvas, const SystemContext& context) {
@@ -341,6 +398,9 @@ void drawConfirmation(M5Canvas& canvas, SettingsPage page) {
     } else if (page == SettingsPage::ConfirmRestart) {
         title = "RESTART POCKET DECK?";
         detail = "Current settings are preserved";
+    } else if (page == SettingsPage::ConfirmFormatStorage) {
+        title = "FORMAT TF CARD?";
+        detail = "ERASE ALL DATA ON THE CARD";
     } else if (page == SettingsPage::ConfirmFactoryReset) {
         title = "FACTORY RESET?";
         detail = "Erase settings, Wi-Fi and BLE";
@@ -426,6 +486,12 @@ void SettingsApp::onInput(const InputEvent& event, SystemContext& context) {
             context.requestCommand(SystemCommand::DisconnectBluetooth);
             break;
         case SettingsEffect::ForgetHost: context.requestCommand(SystemCommand::ForgetHost); break;
+        case SettingsEffect::MountStorage:
+            context.requestCommand(SystemCommand::MountStorage);
+            break;
+        case SettingsEffect::FormatStorage:
+            context.requestCommand(SystemCommand::FormatStorage);
+            break;
         case SettingsEffect::Restart: context.requestCommand(SystemCommand::Restart); break;
         case SettingsEffect::FactoryReset:
             context.requestCommand(SystemCommand::FactoryReset);
@@ -452,9 +518,11 @@ void SettingsApp::render(Display& display, const SystemContext& context) {
         case SettingsPage::Bluetooth: drawBluetooth(canvas, model_, context, ble); break;
         case SettingsPage::System: drawSystem(canvas, model_, context); break;
         case SettingsPage::Diagnostics: drawDiagnostics(canvas, context); break;
+        case SettingsPage::Storage: drawStorage(canvas, model_, context); break;
         case SettingsPage::ConfirmForgetWifi:
         case SettingsPage::ConfirmForgetHost:
         case SettingsPage::ConfirmRestart:
+        case SettingsPage::ConfirmFormatStorage:
         case SettingsPage::ConfirmFactoryReset: drawConfirmation(canvas, model_.page()); break;
     }
 }

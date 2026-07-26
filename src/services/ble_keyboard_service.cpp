@@ -14,6 +14,8 @@
 #include <esp_gap_ble_api.h>
 #include <esp_system.h>
 
+#include "services/diagnostics_service.h"
+
 namespace pd {
 namespace {
 
@@ -156,7 +158,10 @@ bool BleKeyboardService::begin(const char* deviceName) {
     initialized_.store(true);
     error_.store(BleKeyboardError::None);
     if (enabled_.load()) startAdvertising();
-    Serial.printf("[ble] HID ready, bonded=%d\n", bonded_.load() ? 1 : 0);
+    char message[64];
+    std::snprintf(message, sizeof(message), "BLE HID ready, bonded=%d",
+                  bonded_.load() ? 1 : 0);
+    logNow(message);
     return true;
 }
 
@@ -238,7 +243,7 @@ bool BleKeyboardService::forgetHost() {
         security_->setAuthenticationMode(ESP_LE_AUTH_REQ_SC_MITM_BOND);
     }
     requestAdvertising(350);
-    Serial.println("[ble] host bond cleared");
+    logNow("BLE host bond cleared");
     return true;
 }
 
@@ -289,8 +294,11 @@ void BleKeyboardService::handleConnect(uint16_t connectionId, const uint8_t* pee
     error_.store(BleKeyboardError::None);
     char addressText[18];
     formatAddress(addressText, sizeof(addressText), peerAddress);
-    Serial.printf("[ble] host connected, addr=%s type=%u bonds=%d; awaiting stack encryption\n",
-                  addressText, peerAddressType, bondCount);
+    char message[DiagnosticsService::kAsyncMessageCapacity];
+    std::snprintf(message, sizeof(message),
+                  "BLE connect addr=%s type=%u bonds=%d awaiting encryption", addressText,
+                  peerAddressType, bondCount);
+    logAsync(message);
 }
 
 void BleKeyboardService::handleDisconnect(uint8_t reason) {
@@ -298,7 +306,9 @@ void BleKeyboardService::handleDisconnect(uint8_t reason) {
     encrypted_.store(false);
     lastDisconnectReason_.store(reason);
     reportPolicy_.setConnected(false);
-    Serial.printf("[ble] host disconnected, reason=0x%02x\n", reason);
+    char message[80];
+    std::snprintf(message, sizeof(message), "BLE disconnect reason=0x%02x", reason);
+    logAsync(message);
     const BleKeyboardError currentError = error_.load();
     if (currentError == BleKeyboardError::UnauthorizedPeer ||
         currentError == BleKeyboardError::AuthenticationFailed) {
@@ -315,8 +325,11 @@ void BleKeyboardService::handleAuthentication(bool success, uint8_t reason, uint
         error_.store(BleKeyboardError::AuthenticationFailed);
         char addressText[18];
         formatAddress(addressText, sizeof(addressText), peerAddress);
-        Serial.printf("[ble] authentication failed, addr=%s type=%u reason=0x%02x auth=0x%02x\n",
+        char message[DiagnosticsService::kAsyncMessageCapacity];
+        std::snprintf(message, sizeof(message),
+                      "BLE auth failed addr=%s type=%u reason=0x%02x auth=0x%02x",
                       addressText, peerAddressType, reason, authMode);
+        logAsync(message);
         if (server_ != nullptr && connected_.load()) {
             server_->disconnect(connectionId_.load());
         }
@@ -324,7 +337,7 @@ void BleKeyboardService::handleAuthentication(bool success, uint8_t reason, uint
     }
 
     if (pairingRejected_.load()) {
-        Serial.println("[ble] ignoring authentication after rejected pairing");
+        logAsync("BLE auth ignored after rejected pairing");
         if (server_ != nullptr && connected_.load()) {
             server_->disconnect(connectionId_.load());
         }
@@ -337,16 +350,21 @@ void BleKeyboardService::handleAuthentication(bool success, uint8_t reason, uint
     error_.store(BleKeyboardError::None);
     char addressText[18];
     formatAddress(addressText, sizeof(addressText), peerAddress);
-    Serial.printf("[ble] encrypted, addr=%s type=%u bond=%d auth=0x%02x key=%d\n",
-                  addressText, peerAddressType, bondStored ? 1 : 0, authMode,
-                  keyPresent ? 1 : 0);
+    char message[DiagnosticsService::kAsyncMessageCapacity];
+    std::snprintf(message, sizeof(message),
+                  "BLE encrypted addr=%s type=%u bond=%d auth=0x%02x key=%d", addressText,
+                  peerAddressType, bondStored ? 1 : 0, authMode, keyPresent ? 1 : 0);
+    logAsync(message);
 }
 
 bool BleKeyboardService::allowNewPairing(const char* eventName) {
     if (BleKeyboardPolicy::newPairingAllowed(bondedAtConnect_.load())) return true;
     if (!pairingRejected_.exchange(true)) {
         error_.store(BleKeyboardError::UnauthorizedPeer);
-        Serial.printf("[ble] rejected new pairing (%s); forget host first\n", eventName);
+        char message[DiagnosticsService::kAsyncMessageCapacity];
+        std::snprintf(message, sizeof(message),
+                      "BLE rejected new pairing (%s); forget host first", eventName);
+        logAsync(message);
         if (server_ != nullptr && connected_.load()) {
             server_->disconnect(connectionId_.load());
         }
@@ -362,13 +380,26 @@ void BleKeyboardService::handlePasskeyNotification(uint32_t passkey) {
 void BleKeyboardService::startAdvertising() {
     if (!initialized_.load() || !enabled_.load() || connected_.load()) return;
     BLEDevice::startAdvertising();
-    Serial.println("[ble] advertising start requested");
+    logNow("BLE advertising start requested");
 }
 
 void BleKeyboardService::requestAdvertising(uint32_t delayMs) {
     if (!initialized_.load() || !enabled_.load()) return;
     advertisingDueMs_.store(millis() + delayMs);
     advertisingPending_.store(true);
+}
+
+void BleKeyboardService::logNow(const char* message) {
+    if (diagnostics_ != nullptr) {
+        diagnostics_->log(message);
+    } else {
+        Serial.printf("[ble] %s\n", message != nullptr ? message : "");
+    }
+}
+
+void BleKeyboardService::logAsync(const char* message) {
+    if (diagnostics_ != nullptr && diagnostics_->enqueue(message)) return;
+    Serial.printf("[ble] %s\n", message != nullptr ? message : "");
 }
 
 void BleKeyboardService::generatePasskey() {

@@ -1,6 +1,7 @@
 #include "test_harness.h"
 
 #include <array>
+#include <cstring>
 #include <utility>
 
 #include "apps/launcher/launcher_model.h"
@@ -19,6 +20,23 @@
 #include "ui/quick_settings_model.h"
 
 using namespace pd;
+
+namespace {
+
+struct DiagnosticSinkCapture {
+    std::array<std::array<char, DiagnosticsService::kAsyncMessageCapacity>, 8> messages{};
+    std::size_t count = 0;
+};
+
+void captureDiagnostic(void* context, const char* message) {
+    auto* capture = static_cast<DiagnosticSinkCapture*>(context);
+    if (capture == nullptr || capture->count >= capture->messages.size()) return;
+    std::strncpy(capture->messages[capture->count].data(), message,
+                 capture->messages[capture->count].size() - 1);
+    ++capture->count;
+}
+
+}  // namespace
 
 TEST_CASE(plain_a) {
     CHECK_EQ(MacKeymap::buildReport(KeyState{PhysicalKey::A}),
@@ -442,6 +460,36 @@ TEST_CASE(diagnostics_messages_are_safely_truncated) {
              DiagnosticsService::kMessageCapacity - 1);
 }
 
+TEST_CASE(diagnostics_sink_replays_history_and_keeps_full_messages) {
+    DiagnosticsService diagnostics;
+    diagnostics.log("before sink");
+    DiagnosticSinkCapture capture;
+    diagnostics.setSink(&captureDiagnostic, &capture, true);
+    CHECK_EQ(capture.count, 1u);
+    CHECK_STR_EQ(capture.messages[0].data(), "before sink");
+
+    constexpr const char* longMessage =
+        "BLE encrypted addr=AA:BB:CC:DD:EE:FF type=1 bond=1 auth=0x0d key=0";
+    diagnostics.log(longMessage);
+    CHECK_EQ(capture.count, 2u);
+    CHECK_STR_EQ(capture.messages[1].data(), longMessage);
+    CHECK_EQ(std::char_traits<char>::length(diagnostics.newest(0)),
+             DiagnosticsService::kMessageCapacity - 1);
+}
+
+TEST_CASE(async_diagnostics_are_drained_into_the_persistent_sink) {
+    DiagnosticsService diagnostics;
+    DiagnosticSinkCapture capture;
+    diagnostics.setSink(&captureDiagnostic, &capture);
+    CHECK(diagnostics.enqueue("BLE disconnect reason=0x08"));
+    CHECK(diagnostics.enqueue("BLE advertising start requested"));
+    CHECK_EQ(capture.count, 0u);
+    diagnostics.drainPending();
+    CHECK_EQ(capture.count, 2u);
+    CHECK_STR_EQ(capture.messages[0].data(), "BLE disconnect reason=0x08");
+    CHECK_STR_EQ(capture.messages[1].data(), "BLE advertising start requested");
+}
+
 TEST_CASE(quick_settings_adjusts_values_and_clamps) {
     QuickSettingsModel quick;
     quick.open({95, 5, true});
@@ -557,10 +605,38 @@ TEST_CASE(settings_system_actions_and_diagnostics_are_reachable) {
     CHECK_EQ(model.page(), SettingsPage::Diagnostics);
     model.handle(InputAction::Back);
     model.handle(InputAction::Down);
+    model.handle(InputAction::Down);
     model.handle(InputAction::Confirm);
     CHECK_EQ(model.page(), SettingsPage::ConfirmRestart);
     result = model.handle(InputAction::Confirm);
     CHECK_EQ(result.effect, SettingsEffect::Restart);
+}
+
+TEST_CASE(settings_storage_mount_and_format_are_explicit) {
+    SettingsModel model;
+    model.handle(InputAction::Down);
+    model.handle(InputAction::Down);
+    model.handle(InputAction::Confirm);
+    model.handle(InputAction::Down);
+    auto result = model.handle(InputAction::Confirm);
+    CHECK_EQ(result.effect, SettingsEffect::None);
+    CHECK_EQ(model.page(), SettingsPage::Storage);
+
+    result = model.handle(InputAction::Confirm);
+    CHECK_EQ(result.effect, SettingsEffect::MountStorage);
+    model.handle(InputAction::Down);
+    result = model.handle(InputAction::Confirm);
+    CHECK_EQ(result.effect, SettingsEffect::None);
+    CHECK_EQ(model.page(), SettingsPage::ConfirmFormatStorage);
+    result = model.handle(InputAction::Back);
+    CHECK_EQ(result.effect, SettingsEffect::None);
+    CHECK_EQ(model.page(), SettingsPage::Storage);
+    result = model.handle(InputAction::Confirm);
+    CHECK_EQ(result.effect, SettingsEffect::None);
+    CHECK_EQ(model.page(), SettingsPage::ConfirmFormatStorage);
+    result = model.handle(InputAction::Confirm);
+    CHECK_EQ(result.effect, SettingsEffect::FormatStorage);
+    CHECK_EQ(model.page(), SettingsPage::Storage);
 }
 
 TEST_CASE(settings_factory_reset_requires_its_own_confirmation) {
@@ -568,6 +644,7 @@ TEST_CASE(settings_factory_reset_requires_its_own_confirmation) {
     model.handle(InputAction::Down);
     model.handle(InputAction::Down);
     model.handle(InputAction::Confirm);
+    model.handle(InputAction::Down);
     model.handle(InputAction::Down);
     model.handle(InputAction::Down);
     auto result = model.handle(InputAction::Confirm);
@@ -612,6 +689,8 @@ int main() {
     disconnect_blocks_reports_and_resets_gate();
     diagnostics_ring_is_bounded_and_newest_first();
     diagnostics_messages_are_safely_truncated();
+    diagnostics_sink_replays_history_and_keeps_full_messages();
+    async_diagnostics_are_drained_into_the_persistent_sink();
     quick_settings_adjusts_values_and_clamps();
     quick_settings_close_reports_whether_persistence_is_needed();
     settings_categories_open_and_back_out();
@@ -619,6 +698,7 @@ int main() {
     settings_bluetooth_controls_emit_explicit_effects();
     settings_wifi_scan_selection_and_forget_are_explicit();
     settings_system_actions_and_diagnostics_are_reachable();
+    settings_storage_mount_and_format_are_explicit();
     settings_factory_reset_requires_its_own_confirmation();
     return pd_test::finish();
 }

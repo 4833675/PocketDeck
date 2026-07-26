@@ -14,6 +14,7 @@
 #include "services/ble_keyboard_service.h"
 #include "services/diagnostics_service.h"
 #include "services/gps_service.h"
+#include "services/sd_log_service.h"
 #include "services/settings_store.h"
 #include "services/wifi_service.h"
 #include "services/weather_service.h"
@@ -49,6 +50,7 @@ private:
     GpsService gps_;
     WifiService wifi_;
     WeatherService weather_;
+    SdLogService sdLog_;
     DiagnosticsService diagnostics_;
     SettingsStore settingsStore_;
     SystemSettings settings_ = SystemSettings::defaults();

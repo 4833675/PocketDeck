@@ -12,6 +12,8 @@ class BLEServer;
 
 namespace pd {
 
+class DiagnosticsService;
+
 enum class BleKeyboardState : uint8_t {
     Disabled,
     Advertising,
@@ -47,6 +49,7 @@ public:
     BleKeyboardService& operator=(const BleKeyboardService&) = delete;
 
     bool begin(const char* deviceName);
+    void setDiagnostics(DiagnosticsService* diagnostics) { diagnostics_ = diagnostics; }
     void update(uint32_t nowMs);
     void setEnabled(bool enabled);
     bool sendReport(const HidReport& report);
@@ -73,6 +76,8 @@ private:
     void handlePasskeyNotification(uint32_t passkey);
     void startAdvertising();
     void requestAdvertising(uint32_t delayMs);
+    void logNow(const char* message);
+    void logAsync(const char* message);
     void generatePasskey();
     bool hasStoredBond() const;
 
@@ -83,6 +88,7 @@ private:
     BLESecurity* security_ = nullptr;
     ServerCallbacks* serverCallbacks_ = nullptr;
     SecurityCallbacks* securityCallbacks_ = nullptr;
+    DiagnosticsService* diagnostics_ = nullptr;
     BleKeyboardPolicy reportPolicy_;
     std::atomic<bool> initialized_{false};
     std::atomic<bool> enabled_{true};

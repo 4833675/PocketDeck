@@ -11,6 +11,7 @@ namespace pd {
 class BleKeyboardService;
 class DiagnosticsService;
 class GpsService;
+class SdLogService;
 class WifiService;
 class WeatherService;
 struct SystemSettings;
@@ -32,6 +33,8 @@ enum class SystemCommand : uint8_t {
     ToggleBluetooth,
     DisconnectBluetooth,
     ForgetHost,
+    MountStorage,
+    FormatStorage,
     Restart,
     FactoryReset,
 };
@@ -55,6 +58,7 @@ struct SystemContext {
     GpsService* gps = nullptr;
     WifiService* wifi = nullptr;
     WeatherService* weather = nullptr;
+    SdLogService* sdLog = nullptr;
     const DiagnosticsService* diagnostics = nullptr;
     const SystemSettings* settings = nullptr;
 

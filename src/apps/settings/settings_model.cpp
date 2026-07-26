@@ -60,18 +60,40 @@ SettingsResult SettingsModel::handle(InputAction action, uint8_t wifiNetworkCoun
     }
 
     if (page_ == SettingsPage::Diagnostics) {
-        if (action == InputAction::Back) page_ = SettingsPage::System;
+        if (action == InputAction::Back) {
+            page_ = SettingsPage::System;
+            selectedRow_ = 0;
+        }
+        return {};
+    }
+
+    if (page_ == SettingsPage::Storage) {
+        if (action == InputAction::Back) {
+            page_ = SettingsPage::System;
+            selectedRow_ = 1;
+        } else if (action == InputAction::Up) {
+            moveRow(-1, 2);
+        } else if (action == InputAction::Down) {
+            moveRow(1, 2);
+        } else if (action == InputAction::Confirm) {
+            if (selectedRow_ == 0) return {SettingsEffect::MountStorage};
+            page_ = SettingsPage::ConfirmFormatStorage;
+        }
         return {};
     }
 
     if (page_ == SettingsPage::ConfirmForgetWifi ||
         page_ == SettingsPage::ConfirmForgetHost || page_ == SettingsPage::ConfirmRestart ||
+        page_ == SettingsPage::ConfirmFormatStorage ||
         page_ == SettingsPage::ConfirmFactoryReset) {
         if (action == InputAction::Back) {
             if (page_ == SettingsPage::ConfirmForgetWifi) {
                 page_ = SettingsPage::Wifi;
             } else if (page_ == SettingsPage::ConfirmForgetHost) {
                 page_ = SettingsPage::Bluetooth;
+            } else if (page_ == SettingsPage::ConfirmFormatStorage) {
+                page_ = SettingsPage::Storage;
+                selectedRow_ = 1;
             } else {
                 page_ = SettingsPage::System;
             }
@@ -90,9 +112,16 @@ SettingsResult SettingsModel::handle(InputAction action, uint8_t wifiNetworkCoun
         }
         if (page_ == SettingsPage::ConfirmRestart) {
             page_ = SettingsPage::System;
+            selectedRow_ = 2;
             return {SettingsEffect::Restart};
         }
+        if (page_ == SettingsPage::ConfirmFormatStorage) {
+            page_ = SettingsPage::Storage;
+            selectedRow_ = 1;
+            return {SettingsEffect::FormatStorage};
+        }
         page_ = SettingsPage::System;
+        selectedRow_ = 3;
         return {SettingsEffect::FactoryReset};
     }
 
@@ -104,6 +133,7 @@ SettingsResult SettingsModel::handle(InputAction action, uint8_t wifiNetworkCoun
 
     uint8_t rowCount = 3;
     if (page_ == SettingsPage::Wifi) rowCount = 4;
+    if (page_ == SettingsPage::System) rowCount = 4;
     if (action == InputAction::Up) {
         moveRow(-1, rowCount);
         return {};
@@ -139,6 +169,9 @@ SettingsResult SettingsModel::handle(InputAction action, uint8_t wifiNetworkCoun
     if (selectedRow_ == 0) {
         page_ = SettingsPage::Diagnostics;
     } else if (selectedRow_ == 1) {
+        page_ = SettingsPage::Storage;
+        selectedRow_ = 0;
+    } else if (selectedRow_ == 2) {
         page_ = SettingsPage::ConfirmRestart;
     } else {
         page_ = SettingsPage::ConfirmFactoryReset;

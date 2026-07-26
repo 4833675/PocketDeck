@@ -50,6 +50,7 @@ void System::begin() {
     context_.gps = &gps_;
     context_.wifi = &wifi_;
     context_.weather = &weather_;
+    context_.sdLog = &sdLog_;
     context_.diagnostics = &diagnostics_;
     context_.settings = &settings_;
     diagnostics_.logf("Boot reset: %s", context_.resetReason);
@@ -68,9 +69,15 @@ void System::begin() {
     diagnostics_.logf("Board init: Cardputer ADV=%d", detected ? 1 : 0);
     board_.setBrightness(settings_.brightness);
     board_.setVolume(settings_.volume);
+    const bool sdReady = sdLog_.begin();
+    if (sdReady) sdLog_.beginSession(config::kFirmwareVersion, context_.resetReason);
+    diagnostics_.setSink(&SdLogService::diagnosticsSink, &sdLog_, true);
+    diagnostics_.logf("TF logging: %s", sdReady ? "ready /PocketDeck/ble.log"
+                                                : "unavailable");
     const bool canvasReady = display_.begin();
     const bool gpsReady = gps_.begin();
     diagnostics_.logf("GPS UART: %s 115200 RX15 TX13", gpsReady ? "ready" : "failed");
+    bleKeyboard_.setDiagnostics(&diagnostics_);
     bleKeyboard_.setEnabled(settings_.bleEnabled);
     const bool bleReady = bleKeyboard_.begin(settings_.deviceName.data());
     const bool wifiReady = wifi_.begin(settings_.wifiEnabled);
@@ -93,6 +100,7 @@ void System::update() {
     gps_.update();
     wifi_.update(nowMs);
     bleKeyboard_.update(nowMs);
+    diagnostics_.drainPending();
     refreshContext(nowMs);
     bleKeyboard_.updateBattery(context_.batteryPercent);
     trackBleState(bleKeyboard_.snapshot());
@@ -225,6 +233,21 @@ void System::handleSystemCommand(SystemCommand command) {
         case SystemCommand::ForgetHost: {
             const bool forgotten = bleKeyboard_.forgetHost();
             diagnostics_.log(forgotten ? "BLE host bond deleted" : "BLE bond deletion failed");
+            return;
+        }
+        case SystemCommand::MountStorage: {
+            const bool mounted = sdLog_.remount();
+            if (mounted) sdLog_.beginSession(config::kFirmwareVersion, context_.resetReason);
+            diagnostics_.log(mounted ? "TF card mounted; logging active"
+                                     : "TF card mount failed");
+            return;
+        }
+        case SystemCommand::FormatStorage: {
+            diagnostics_.log("TF card format confirmed");
+            const bool formatted = sdLog_.formatCard();
+            if (formatted) sdLog_.beginSession(config::kFirmwareVersion, context_.resetReason);
+            diagnostics_.log(formatted ? "TF card formatted; logging active"
+                                       : "TF card format failed");
             return;
         }
         case SystemCommand::Restart:

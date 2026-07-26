@@ -21,9 +21,11 @@ enum class SettingsPage : uint8_t {
     Bluetooth,
     System,
     Diagnostics,
+    Storage,
     ConfirmForgetWifi,
     ConfirmForgetHost,
     ConfirmRestart,
+    ConfirmFormatStorage,
     ConfirmFactoryReset,
 };
 
@@ -37,6 +39,8 @@ enum class SettingsEffect : uint8_t {
     ToggleBluetooth,
     DisconnectBluetooth,
     ForgetHost,
+    MountStorage,
+    FormatStorage,
     Restart,
     FactoryReset,
 };
