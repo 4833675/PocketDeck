@@ -114,6 +114,36 @@ bool SdLogService::append(const char* message) {
     return true;
 }
 
+bool SdLogService::dumpLogs(Print& output, bool includePrevious) {
+    if (!ready_ || snapshot_.state != SdLogState::Ready) {
+        output.println("[console] TF logging is not ready");
+        return false;
+    }
+
+    bool dumped = false;
+    if (includePrevious && SD.exists(kPreviousLogPath)) {
+        dumped = dumpFile(output, kPreviousLogPath) || dumped;
+    }
+    if (SD.exists(kLogPath)) dumped = dumpFile(output, kLogPath) || dumped;
+    if (!dumped) output.println("[console] No log files found");
+    return dumped;
+}
+
+bool SdLogService::clearLogs() {
+    if (!ready_ || snapshot_.state != SdLogState::Ready) return false;
+    if (SD.exists(kLogPath) && !SD.remove(kLogPath)) {
+        setError("Could not clear ble.log");
+        return false;
+    }
+    if (SD.exists(kPreviousLogPath) && !SD.remove(kPreviousLogPath)) {
+        setError("Could not clear old log");
+        return false;
+    }
+    snapshot_.linesWritten = 0;
+    refreshUsage();
+    return true;
+}
+
 void SdLogService::diagnosticsSink(void* context, const char* message) {
     if (context == nullptr) return;
     static_cast<SdLogService*>(context)->append(message);
@@ -207,6 +237,27 @@ bool SdLogService::eraseDirectory(const char* path, uint8_t depth) {
     }
     directory.close();
     return success;
+}
+
+bool SdLogService::dumpFile(Print& output, const char* path) {
+    File file = SD.open(path, FILE_READ);
+    if (!file) {
+        output.printf("[console] Could not open %s\n", path);
+        return false;
+    }
+
+    output.printf("<<< POCKETDECK LOG BEGIN path=%s size=%u >>>\n", path,
+                  static_cast<unsigned>(file.size()));
+    std::array<uint8_t, 256> buffer{};
+    while (file.available()) {
+        const size_t count = file.read(buffer.data(), buffer.size());
+        if (count == 0) break;
+        output.write(buffer.data(), count);
+        delay(1);
+    }
+    file.close();
+    output.printf("\n<<< POCKETDECK LOG END path=%s >>>\n", path);
+    return true;
 }
 
 bool SdLogService::rotateIfNeeded() {

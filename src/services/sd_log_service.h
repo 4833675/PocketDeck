@@ -3,6 +3,8 @@
 #include <array>
 #include <cstdint>
 
+class Print;
+
 namespace pd {
 
 enum class SdLogState : uint8_t {
@@ -31,6 +33,8 @@ public:
     bool formatCard();
     bool beginSession(const char* firmwareVersion, const char* resetReason);
     bool append(const char* message);
+    bool dumpLogs(Print& output, bool includePrevious);
+    bool clearLogs();
     SdLogSnapshot snapshot() const { return snapshot_; }
 
     static void diagnosticsSink(void* context, const char* message);
@@ -40,6 +44,7 @@ private:
     void unmount();
     bool ensureDirectory();
     bool eraseDirectory(const char* path, uint8_t depth);
+    bool dumpFile(Print& output, const char* path);
     bool rotateIfNeeded();
     void refreshUsage();
     void setError(const char* message, SdLogState state = SdLogState::Error);

@@ -12,6 +12,7 @@
 #include "core/gps_data.h"
 #include "core/input_router.h"
 #include "core/mac_keymap.h"
+#include "core/serial_command.h"
 #include "core/system_settings.h"
 #include "core/text_keymap.h"
 #include "core/weather_data.h"
@@ -490,6 +491,17 @@ TEST_CASE(async_diagnostics_are_drained_into_the_persistent_sink) {
     CHECK_STR_EQ(capture.messages[1].data(), "BLE advertising start requested");
 }
 
+TEST_CASE(serial_log_commands_are_normalized_and_require_clear_confirmation) {
+    CHECK_EQ(parseSerialCommand(nullptr), SerialCommand::None);
+    CHECK_EQ(parseSerialCommand(""), SerialCommand::None);
+    CHECK_EQ(parseSerialCommand("  log   status  "), SerialCommand::LogStatus);
+    CHECK_EQ(parseSerialCommand("LOG DUMP"), SerialCommand::LogDump);
+    CHECK_EQ(parseSerialCommand("log dump all"), SerialCommand::LogDumpAll);
+    CHECK_EQ(parseSerialCommand("LOG CLEAR"), SerialCommand::Unknown);
+    CHECK_EQ(parseSerialCommand("LOG CLEAR YES"), SerialCommand::LogClearConfirmed);
+    CHECK_EQ(parseSerialCommand("help"), SerialCommand::Help);
+}
+
 TEST_CASE(quick_settings_adjusts_values_and_clamps) {
     QuickSettingsModel quick;
     quick.open({95, 5, true});
@@ -691,6 +703,7 @@ int main() {
     diagnostics_messages_are_safely_truncated();
     diagnostics_sink_replays_history_and_keeps_full_messages();
     async_diagnostics_are_drained_into_the_persistent_sink();
+    serial_log_commands_are_normalized_and_require_clear_confirmation();
     quick_settings_adjusts_values_and_clamps();
     quick_settings_close_reports_whether_persistence_is_needed();
     settings_categories_open_and_back_out();

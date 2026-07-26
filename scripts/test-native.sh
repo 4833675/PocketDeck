@@ -33,6 +33,7 @@ mkdir -p .build
 sources=(test/native/test_main.cpp src/core/mac_keymap.cpp src/core/text_keymap.cpp)
 for source in src/core/input_router.cpp src/core/g0_gesture.cpp src/core/system_settings.cpp \
               src/core/ble_keyboard_policy.cpp src/core/clock_data.cpp src/core/gps_data.cpp \
+              src/core/serial_command.cpp \
               src/core/wifi_data.cpp \
               src/core/weather_data.cpp \
               src/apps/launcher/launcher_model.cpp \

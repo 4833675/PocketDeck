@@ -1,5 +1,8 @@
 #pragma once
 
+#include <array>
+#include <cstddef>
+
 #include "apps/gps/gps_app.h"
 #include "apps/keyboard/keyboard_app.h"
 #include "apps/launcher/launcher_app.h"
@@ -36,6 +39,8 @@ private:
     void closeQuickSettings();
     void handleQuickSettingsResult(const QuickSettingsResult& result);
     void handleSystemCommand(SystemCommand command);
+    void handleSerialConsole();
+    void executeSerialCommand(const char* command);
     void refreshContext(uint32_t nowMs);
     void trackBleState(const BleKeyboardSnapshot& snapshot);
     void trackGpsState(const GpsSnapshot& snapshot);
@@ -72,6 +77,9 @@ private:
     bool lastWifiStateValid_ = false;
     WeatherState lastWeatherState_ = WeatherState::Idle;
     bool lastWeatherStateValid_ = false;
+    std::array<char, 48> serialCommandBuffer_{};
+    std::size_t serialCommandLength_ = 0;
+    bool serialCommandOverflow_ = false;
     uint32_t lastRenderMs_ = 0;
 };
 

@@ -6,6 +6,7 @@
 #include <esp_system.h>
 
 #include "core/clock_data.h"
+#include "core/serial_command.h"
 #include "pocket_deck_config.h"
 
 namespace pd {
@@ -35,6 +36,16 @@ const char* bleStateName(BleKeyboardState state) {
         case BleKeyboardState::Pairing: return "pairing";
         case BleKeyboardState::Connected: return "connected";
         case BleKeyboardState::Error: return "error";
+    }
+    return "unknown";
+}
+
+const char* sdLogStateName(SdLogState state) {
+    switch (state) {
+        case SdLogState::Unavailable: return "unavailable";
+        case SdLogState::Ready: return "ready";
+        case SdLogState::Formatting: return "formatting";
+        case SdLogState::Error: return "error";
     }
     return "unknown";
 }
@@ -91,11 +102,13 @@ void System::begin() {
     diagnostics_.logf("System ready: DISP=%d BLE=%d GPS=%d WIFI=%d WX=%d",
                       canvasReady ? 1 : 0, bleReady ? 1 : 0, gpsReady ? 1 : 0,
                       wifiReady ? 1 : 0, weatherReady ? 1 : 0);
+    Serial.println("[console] ready; type HELP or LOG STATUS");
     render();
 }
 
 void System::update() {
     board_.update();
+    handleSerialConsole();
     const uint32_t nowMs = millis();
     gps_.update();
     wifi_.update(nowMs);
@@ -148,6 +161,77 @@ void System::update() {
 
     if (nowMs - lastRenderMs_ >= 33) render();
     delay(1);
+}
+
+void System::handleSerialConsole() {
+    uint8_t processed = 0;
+    while (Serial.available() > 0 && processed < 96) {
+        ++processed;
+        const int incoming = Serial.read();
+        if (incoming < 0) break;
+        const char character = static_cast<char>(incoming);
+        if (character == '\r' || character == '\n') {
+            if (serialCommandOverflow_) {
+                Serial.println("[console] command too long");
+            } else if (serialCommandLength_ > 0) {
+                serialCommandBuffer_[serialCommandLength_] = '\0';
+                executeSerialCommand(serialCommandBuffer_.data());
+            }
+            serialCommandBuffer_.fill('\0');
+            serialCommandLength_ = 0;
+            serialCommandOverflow_ = false;
+            continue;
+        }
+        if (character == '\b' || character == 0x7F) {
+            if (serialCommandLength_ > 0) --serialCommandLength_;
+            continue;
+        }
+        if (character < 0x20 || character > 0x7E) continue;
+        if (serialCommandLength_ + 1 >= serialCommandBuffer_.size()) {
+            serialCommandOverflow_ = true;
+            continue;
+        }
+        serialCommandBuffer_[serialCommandLength_++] = character;
+    }
+}
+
+void System::executeSerialCommand(const char* command) {
+    switch (parseSerialCommand(command)) {
+        case SerialCommand::None: return;
+        case SerialCommand::Help:
+            Serial.println("[console] LOG STATUS    show TF logger state");
+            Serial.println("[console] LOG DUMP      output /PocketDeck/ble.log");
+            Serial.println("[console] LOG DUMP ALL  output previous and current logs");
+            Serial.println("[console] LOG CLEAR YES erase both logs and start a new session");
+            return;
+        case SerialCommand::LogStatus: {
+            const SdLogSnapshot storage = sdLog_.snapshot();
+            Serial.printf("[console] state=%s mounted=%d size=%lluMB used=%lluMB lines=%lu error=%s\n",
+                          sdLogStateName(storage.state), storage.mounted ? 1 : 0,
+                          static_cast<unsigned long long>(storage.cardBytes / (1024u * 1024u)),
+                          static_cast<unsigned long long>(storage.usedBytes / (1024u * 1024u)),
+                          static_cast<unsigned long>(storage.linesWritten),
+                          storage.error[0] != '\0' ? storage.error.data() : "none");
+            return;
+        }
+        case SerialCommand::LogDump:
+            sdLog_.dumpLogs(Serial, false);
+            return;
+        case SerialCommand::LogDumpAll:
+            sdLog_.dumpLogs(Serial, true);
+            return;
+        case SerialCommand::LogClearConfirmed: {
+            bool cleared = sdLog_.clearLogs();
+            if (cleared) {
+                cleared = sdLog_.beginSession(config::kFirmwareVersion, context_.resetReason);
+            }
+            Serial.printf("[console] log clear %s\n", cleared ? "complete" : "failed");
+            return;
+        }
+        case SerialCommand::Unknown:
+            Serial.println("[console] unknown command; type HELP");
+            return;
+    }
 }
 
 App* System::appForId(AppId id) {

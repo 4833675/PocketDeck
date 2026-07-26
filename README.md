@@ -8,7 +8,7 @@ The Bluetooth keyboard and system shell run on the Cardputer Adv alone. The GPS
 dashboard and GPS-local weather additionally require the optional **M5Stack Cap
 LoRa-1262**, which contains the supported GNSS receiver.
 
-The current `0.3.2` firmware contains a Graphite Mint system shell, launcher,
+The current `0.3.3` firmware contains a Graphite Mint system shell, launcher,
 secure single-host Bluetooth LE keyboard for macOS, a live GNSS/GPS app for the
 Cap LoRa-1262, Wi-Fi scanning and connection, NTP time, GPS-local weather,
 Bluetooth/Wi-Fi/System settings, Quick Settings, persistent preferences,
@@ -176,6 +176,19 @@ The active file is `/PocketDeck/ble.log`. At 512 KB it rotates to
 closed immediately so an unexpected shutdown does not lose a buffered session.
 Lines contain UTC after NTP synchronization and always contain device uptime.
 Power Pocket Deck off before removing the card to read it on another computer.
+
+The same files can be read without removing the card. Connect USB, open the
+115200-baud serial monitor, type a command, and press Enter:
+
+| Serial command | Action |
+|---|---|
+| `HELP` | List the available serial-console commands |
+| `LOG STATUS` | Show card, capacity, logger, and write status |
+| `LOG DUMP` | Print the current `/PocketDeck/ble.log` |
+| `LOG DUMP ALL` | Print the rotated log followed by the current log |
+| `LOG CLEAR YES` | Erase both logs and immediately begin a new session |
+
+`LOG CLEAR` without the final `YES` is deliberately rejected.
 
 ## GPS / GNSS
 
