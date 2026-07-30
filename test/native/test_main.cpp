@@ -10,6 +10,7 @@
 #include "core/clock_data.h"
 #include "core/g0_gesture.h"
 #include "core/gps_data.h"
+#include "core/lora_data.h"
 #include "core/input_router.h"
 #include "core/mac_keymap.h"
 #include "core/serial_command.h"
@@ -666,6 +667,119 @@ TEST_CASE(settings_factory_reset_requires_its_own_confirmation) {
     CHECK_EQ(result.effect, SettingsEffect::FactoryReset);
 }
 
+TEST_CASE(lora_draft_accepts_printable_ascii_and_copies_exact_payload) {
+    LoRaData model;
+    CHECK(model.draftEmpty());
+    CHECK(!model.draftFull());
+    CHECK(!model.canSend());
+    CHECK(model.appendDraft('A'));
+    CHECK(model.appendDraft(' '));
+    CHECK(model.appendDraft('~'));
+    CHECK(!model.appendDraft('\n'));
+    CHECK(!model.appendDraft(static_cast<char>(0x7f)));
+    CHECK_EQ(model.draftLength(), 3u);
+    CHECK_STR_EQ(model.draft(), "A ~");
+
+    std::array<uint8_t, kLoRaPayloadLimit> payload{};
+    CHECK_EQ(model.copyDraft(payload.data(), payload.size()), 3u);
+    CHECK_EQ(payload[0], static_cast<uint8_t>('A'));
+    CHECK_EQ(payload[1], static_cast<uint8_t>(' '));
+    CHECK_EQ(payload[2], static_cast<uint8_t>('~'));
+    CHECK_EQ(model.copyDraft(payload.data(), 2), 0u);
+
+    CHECK(model.eraseDraft());
+    CHECK_STR_EQ(model.draft(), "A ");
+    model.clearDraft();
+    for (std::size_t index = 0; index < kLoRaPayloadLimit; ++index) {
+        CHECK(model.appendDraft('x'));
+    }
+    CHECK(model.draftFull());
+    CHECK(!model.appendDraft('y'));
+    CHECK_EQ(model.draftLength(), kLoRaPayloadLimit);
+}
+
+TEST_CASE(lora_send_requires_a_listening_nonempty_draft_and_records_exact_tx) {
+    LoRaData model;
+    CHECK_EQ(model.state(), LoRaRadioState::Unavailable);
+    model.beginInitialization();
+    CHECK_EQ(model.state(), LoRaRadioState::Initializing);
+    model.beginListening();
+    CHECK_EQ(model.state(), LoRaRadioState::Listening);
+    CHECK(!model.beginTransmit());
+    CHECK(model.appendDraft('T'));
+    CHECK(model.appendDraft('X'));
+    CHECK(model.canSend());
+    CHECK(model.beginTransmit());
+    CHECK_EQ(model.state(), LoRaRadioState::Transmitting);
+    CHECK(model.completeTransmit(0));
+    CHECK_EQ(model.state(), LoRaRadioState::Listening);
+    CHECK(model.draftEmpty());
+    CHECK_EQ(model.counters().sent, 1u);
+    CHECK_EQ(model.historySize(), 1u);
+    CHECK_EQ(model.historyAt(0).direction, LoRaMessageDirection::Tx);
+    CHECK_EQ(model.historyAt(0).length, 2u);
+    CHECK_STR_EQ(model.historyAt(0).text.data(), "TX");
+}
+
+TEST_CASE(lora_history_evicts_oldest_and_has_readable_direction_labels) {
+    LoRaData model;
+    model.beginListening();
+    for (uint8_t index = 0; index < 7; ++index) {
+        const uint8_t byte[] = {static_cast<uint8_t>('0' + index)};
+        CHECK(model.recordReceive(byte, sizeof(byte), -70.0f - index,
+                                  7.0f - index, 0));
+    }
+    CHECK_EQ(model.historySize(), kLoRaHistoryCapacity);
+    CHECK_EQ(model.historyAt(0).direction, LoRaMessageDirection::Rx);
+    CHECK_STR_EQ(model.historyAt(0).text.data(), "1");
+    CHECK_STR_EQ(model.historyAt(kLoRaHistoryCapacity - 1).text.data(), "6");
+    CHECK_STR_EQ(loraMessageDirectionLabel(LoRaMessageDirection::Rx), "RX");
+    CHECK_STR_EQ(loraMessageDirectionLabel(LoRaMessageDirection::Tx), "TX");
+}
+
+TEST_CASE(lora_rx_sanitizes_payload_rejects_oversize_and_tracks_quality) {
+    LoRaData model;
+    model.beginListening();
+    const uint8_t received[] = {'O', 'K', 0x00, 0x1f, 0x7f, '!', 0xff};
+    CHECK(model.recordReceive(received, sizeof(received), -87.5f, 6.25f, 0));
+    CHECK_EQ(model.counters().received, 1u);
+    CHECK_EQ(model.counters().droppedPackets, 0u);
+    CHECK(model.hasReceiveQuality());
+    CHECK_EQ(model.lastRssi(), -87.5f);
+    CHECK_EQ(model.lastSnr(), 6.25f);
+    CHECK_STR_EQ(model.historyAt(0).text.data(), "OK...!.");
+
+    std::array<uint8_t, kLoRaPayloadLimit + 1> oversize{};
+    CHECK(!model.recordReceive(oversize.data(), oversize.size(), -20.0f, 1.0f, -1));
+    CHECK_EQ(model.counters().received, 1u);
+    CHECK_EQ(model.counters().droppedPackets, 1u);
+    CHECK_EQ(model.historySize(), 1u);
+    CHECK_EQ(model.lastRssi(), -87.5f);
+    CHECK_EQ(model.lastSnr(), 6.25f);
+    CHECK_EQ(model.lastStatusCode(), -1);
+}
+
+TEST_CASE(lora_state_transitions_cover_crc_restart_and_persistent_error) {
+    LoRaData model;
+    model.beginInitialization();
+    model.beginListening();
+    model.recordCrcFailure(-7);
+    CHECK_EQ(model.state(), LoRaRadioState::Listening);
+    CHECK_EQ(model.counters().crcFailures, 1u);
+    CHECK_EQ(model.lastStatusCode(), -7);
+
+    model.beginRecoverableRestart(-8);
+    CHECK_EQ(model.state(), LoRaRadioState::Initializing);
+    CHECK_EQ(model.lastStatusCode(), -8);
+    model.completeRecoverableRestart(0);
+    CHECK_EQ(model.state(), LoRaRadioState::Listening);
+    CHECK_EQ(model.lastStatusCode(), 0);
+    model.setPersistentError(-9);
+    CHECK_EQ(model.state(), LoRaRadioState::Error);
+    CHECK_EQ(model.lastStatusCode(), -9);
+    CHECK_STR_EQ(loraRadioStateLabel(LoRaRadioState::Error), "ERROR");
+}
+
 int main() {
     plain_a();
     mac_modifiers();
@@ -713,5 +827,10 @@ int main() {
     settings_system_actions_and_diagnostics_are_reachable();
     settings_storage_mount_and_format_are_explicit();
     settings_factory_reset_requires_its_own_confirmation();
+    lora_draft_accepts_printable_ascii_and_copies_exact_payload();
+    lora_send_requires_a_listening_nonempty_draft_and_records_exact_tx();
+    lora_history_evicts_oldest_and_has_readable_direction_labels();
+    lora_rx_sanitizes_payload_rejects_oversize_and_tracks_quality();
+    lora_state_transitions_cover_crc_restart_and_persistent_error();
     return pd_test::finish();
 }
