@@ -1,79 +1,77 @@
 # Pocket Deck
 
-Pocket Deck is standalone, keyboard-first firmware built specifically for the
-**M5Stack Cardputer Adv** (Stamp-S3A, 240x135 display, 8 MB flash). It is not
-intended for the original Cardputer model.
+Pocket Deck is standalone, keyboard-first firmware for the **M5Stack Cardputer
+Adv** (Stamp-S3A, 240×135 display, 8 MB flash). It turns the device into a small
+system deck with a secure macOS Bluetooth keyboard, Pocket SSH terminal, GPS
+dashboard, multi-profile Wi-Fi, time, weather, settings, and diagnostics.
 
-The Bluetooth keyboard and system shell run on the Cardputer Adv alone. The GPS
-dashboard and GPS-local weather additionally require the optional **M5Stack Cap
-LoRa-1262**, which contains the supported GNSS receiver.
+It is a from-scratch project, not a Claude Desktop Buddy fork, and it does not
+support the original Cardputer model.
 
-The current `0.3.5` firmware contains a Graphite Mint system shell, launcher,
-secure single-host Bluetooth LE keyboard for macOS, a live GNSS/GPS app for the
-Cap LoRa-1262, Wi-Fi scanning and connection, NTP time, GPS-local weather,
-Bluetooth/Wi-Fi/System settings, Quick Settings, persistent preferences,
-on-device diagnostics, and optional persistent BLE diagnostics on microSD.
+Current firmware: **0.5.0**
 
-Hardware validation procedures are kept under [`docs/validation/`](docs/validation/).
+## Features
 
-## Target and boundaries
+- Graphite Mint launcher, status bar, Quick Settings, and local system controls.
+- Secure BLE HID keyboard with one bonded Mac and a stable `Pocket Deck` identity.
+- Up to eight saved 2.4 GHz Wi-Fi networks with strongest-known selection and
+  fallback.
+- NTP clock and GPS-local weather from Open-Meteo.
+- Interactive SSH terminal with six saved hosts, public-key authentication,
+  ANSI colors, local scrollback, reconnect, and quick commands.
+- Four-page GNSS dashboard for the optional M5Stack Cap LoRa-1262.
+- Raw LoRa P2P text terminal for a matching SX1262/RadioLib peer.
+- Versioned Preferences/NVS settings and confirmed destructive actions.
+- On-device diagnostics plus optional rotating logs on a TF/microSD card.
 
-- M5Stack Cardputer Adv / Stamp-S3A, 8 MB flash, 240×135 display.
-- Optional M5Stack Cap LoRa-1262 for GPS and location-based weather.
-- PlatformIO + Arduino-ESP32, M5Cardputer 1.1.1, and M5Unified 0.2.17.
-- One 3 MB application partition plus LittleFS; no OTA slot and no PSRAM.
-- One stable BLE HID identity named `Pocket Deck` and one bonded Mac.
-- English UI with built-in fonts; no filesystem assets are currently required.
-- No microphone, dictation, Claude integration, LoRa radio, IR, SSH terminal,
-  MQTT, or Home Assistant integration yet.
+Not currently implemented: microphone/dictation, LoRaWAN, IR, SFTP, SSH tunnels,
+MQTT, Home Assistant, OTA updates, or Claude integration.
 
-## Prerequisites
+## Hardware
 
-Install PlatformIO, clone the repository, and connect the Cardputer Adv over
-USB:
+Required:
+
+- M5Stack Cardputer Adv / Stamp-S3A
+- USB-C data cable
+
+Optional:
+
+- M5Stack Cap LoRa-1262 for GPS, location-based weather, and LoRa P2P
+- FAT-formatted TF/microSD card for persistent diagnostics
+
+The target has no PSRAM. The firmware uses one 3 MB application partition and
+has no OTA slot. No LittleFS assets are currently required.
+
+## Build and flash
+
+Install PlatformIO, clone the repository, and connect the Cardputer Adv:
 
 ```bash
 git clone https://github.com/4833675/PocketDeck.git
 cd PocketDeck
-```
-
-## Test, build, flash, and monitor
-
-Run the hardware-independent keymap, routing, settings, navigation, and policy
-tests:
-
-```bash
 scripts/test-native.sh
-```
-
-Build the firmware:
-
-```bash
 pio run -e cardputer-adv
-```
-
-Flash the connected Cardputer Adv:
-
-```bash
 pio run -e cardputer-adv -t upload
 ```
 
-Open the 115200-baud serial monitor:
+SSH is optional. To include SSH support in your local firmware image, configure
+a private key as described in [Add an SSH private key](#add-an-ssh-private-key)
+before building. A build without a readable key still succeeds, but SSH
+connections are disabled.
+
+Open the serial console at 115200 baud:
 
 ```bash
 pio device monitor -e cardputer-adv
 ```
 
-Use `Ctrl+C` to leave the monitor. Native USB disconnects briefly during reset,
-so a monitor attached after flashing can miss the earliest serial lines. The
-same bounded diagnostic events are available under Settings > System >
-Diagnostics. `uploadfs` is not needed in this phase because the UI has no
-LittleFS assets.
+`uploadfs` is unnecessary. For ordinary updates, power the device off, connect
+USB, and upload. If no serial port appears or upload remains at `Connecting...`,
+enter recovery download mode: power off, hold G0, connect USB, then release G0.
 
-## System controls
+## Controls
 
-The Cardputer has no dedicated arrow cluster, so system navigation uses the Fn
-layer:
+The Cardputer has no dedicated arrow cluster, so local navigation uses Fn:
 
 | Control | System action |
 |---|---|
@@ -83,247 +81,282 @@ layer:
 | Fn + `/` | Right |
 | Enter | Open / confirm |
 | Backspace | Back / cancel |
-| G0 short press | Return directly to Home |
-| G0 hold for 600 ms | Open Quick Settings |
+| G0 tap | Home |
+| G0 hold for 600 ms | Quick Settings |
 
-Home is a horizontal card launcher. Use Fn+`,` and Fn+`/` to select Keyboard,
-GPS, Weather, or Settings, then Enter to open it. Every boot returns to Home with
-Keyboard selected; booting never makes ordinary keys active as HID input by
-itself.
+Home contains Keyboard, SSH Terminal, GPS, LORA, Weather, and Settings. The
+status bar shows local 24-hour time, `WiFi`, `BT`, and battery percentage. Wi-Fi
+and Bluetooth are mint when connected, amber when enabled but disconnected, and
+red when disabled.
 
-The status bar shows a 24-hour clock in the center and `WiFi`, `BT`, and battery
-percentage on the right. Each radio label is mint while connected, amber while
-enabled but disconnected, and red while deliberately off. The clock shows
-`--:--` until NTP has supplied a plausible time.
+Quick Settings uses Left/Right for brightness, Up/Down for volume, Enter to
+toggle Bluetooth, and Backspace or G0 to close and save.
 
-Quick Settings is an overlay over the current app:
+## Bluetooth keyboard
 
-| Control | Quick Settings action |
+1. Open Keyboard from Home.
+2. On the Mac, open System Settings > Bluetooth and select `Pocket Deck`.
+3. Enter the six-digit code shown by Pocket Deck into the Mac dialog.
+4. Wait for `CONNECTED` and the encrypted BLE HID status.
+
+Pocket Deck intentionally stores one host bond. To change computers, use
+Settings > Bluetooth > Forget host. Keyboard reports are sent only while the
+Keyboard app is foreground and the link is authenticated; keys pressed on Home,
+Settings, or while disconnected are never replayed to the Mac.
+
+Modifier mapping:
+
+| Cardputer | macOS |
 |---|---|
-| Left / Right | Brightness −10 / +10 |
-| Up / Down | Volume +10 / −10 |
-| Enter | Toggle BLE keyboard service |
-| Backspace or G0 short | Close and persist changed values |
+| Ctrl | Control |
+| Shift | Shift |
+| Opt | Option |
+| Alt | Command |
+| Fn | Local layer selector |
 
-Opening Quick Settings from Keyboard first sends an all-keys-up report. When it
-closes, Keyboard waits until locally held keys are released before forwarding
-input again.
-
-## Pair one Mac
-
-1. Boot Pocket Deck and press Enter on the selected Keyboard card.
-2. Confirm that the Keyboard screen says `PAIRING` and shows a six-digit code.
-3. On the Mac, open System Settings > Bluetooth and select `Pocket Deck`.
-4. When macOS asks for the pairing code, enter the six digits shown on Pocket
-   Deck into the Mac dialog. Do not type the code on the Cardputer.
-5. Wait for Pocket Deck to show `CONNECTED` and `encrypted BLE HID`.
-
-The bond is stored by the ESP32 BLE stack and should reconnect after a Pocket
-Deck restart without changing the device identity. Pocket Deck intentionally
-accepts only one bonded host. It stores the local label `Mac`; it does not claim
-to discover or persist the computer's human-readable Bluetooth name.
-
-Keys are sent only while Keyboard is the foreground app and the BLE link is
-encrypted. Input is discarded while disconnected and is not replayed later.
-The screen and diagnostics never display or log typed characters, matrix state,
-or HID reports.
-
-## macOS keyboard mapping
-
-| Physical key | macOS meaning |
-|---|---|
-| Ctrl | Left Control |
-| Shift | Left Shift |
-| Opt | Left Option |
-| Alt | Left Command |
-| Fn | Local layer selector; never sent to the Mac |
-
-The ordinary letter, number, punctuation, Space, Tab, Enter, and Backspace keys
-use standard US keyboard HID usages. The local Fn layer adds:
+Fn adds Escape, F1–F12, Forward Delete, Caps Lock, and arrow keys:
 
 | Combination | HID key |
 |---|---|
 | Fn + `` ` `` | Escape |
 | Fn + `1` … `0` | F1 … F10 |
-| Fn + `-` | F11 |
-| Fn + `=` | F12 |
+| Fn + `-` / `=` | F11 / F12 |
 | Fn + Backspace | Forward Delete |
 | Fn + Tab | Caps Lock |
-| Fn + `;` | Up Arrow |
-| Fn + `,` | Left Arrow |
-| Fn + `.` | Down Arrow |
-| Fn + `/` | Right Arrow |
+| Fn + `;` `,` `.` `/` | Up / Left / Down / Right |
 
-Without Fn, `` ` ``, `;`, `,`, `.`, and `/` remain ordinary punctuation.
-Reports support the standard six simultaneous non-modifier keys plus the
-modifier byte; larger chords produce the standard HID rollover report.
+All ordinary letters, numbers, punctuation, Space, Tab, Enter, and Backspace use
+standard US keyboard HID usages.
 
-## TF card diagnostic logging
+## Pocket SSH terminal
 
-Pocket Deck can persist system and detailed BLE lifecycle events to the built-in
-microSD slot. Insert a FAT-formatted card with its contacts facing away from the
-screen, then boot the device. Logging starts automatically when the card mounts.
-The SD bus is initialized conservatively and keeps the optional Cap LoRa-1262
-chip-select inactive because that accessory shares the same SPI data pins.
+SSH requires an active Wi-Fi connection and a private key embedded at build
+time. Open SSH Terminal from Home, then press `N` to create a host with a label,
+hostname/IP, username, and port. Up to six hosts are stored in NVS; `E` edits,
+`D` deletes after confirmation, and Enter connects. Recently used hosts move to
+the top.
 
-Open Settings > System > TF card logs to see card status. `Mount / retry` handles
-a card inserted after boot. `Format TF card` requires a separate confirmation
-screen and erases all data on the card; it can also prepare a card that does not
-yet contain a filesystem supported by the firmware.
+### Add an SSH private key
 
-The active file is `/PocketDeck/ble.log`. At 512 KB it rotates to
-`/PocketDeck/ble-prev.log`, keeping storage bounded. Every event is flushed and
-closed immediately so an unexpected shutdown does not lose a buffered session.
-Lines contain UTC after NTP synchronization and always contain device uptime.
-Power Pocket Deck off before removing the card to read it on another computer.
+Pocket Deck supports public-key authentication only. It does not read your
+computer's `~/.ssh/config`, and it does not copy host aliases, usernames, or
+ports from that file. Those fields are entered separately on the device.
 
-The same files can be read without removing the card. Connect USB, open the
-115200-baud serial monitor, type a command, and press Enter:
+The firmware cannot prompt for a key passphrase, so use an **unencrypted,
+text-format private key**. A dedicated key is recommended because anyone who
+obtains the flashed firmware may be able to extract it. To generate a dedicated
+3072-bit RSA key without a passphrase:
 
-| Serial command | Action |
+```bash
+ssh-keygen -t rsa -b 3072 \
+  -f "$HOME/.ssh/pocketdeck_id_rsa" \
+  -N "" -C "pocket-deck"
+chmod 600 "$HOME/.ssh/pocketdeck_id_rsa"
+```
+
+If you already have an unencrypted private key, you can reuse it. If its `.pub`
+file is missing, recreate the public key without exposing the private key:
+
+```bash
+ssh-keygen -y -f "$HOME/.ssh/id_rsa" > "$HOME/.ssh/id_rsa.pub"
+```
+
+Install **only the public key** on the remote account. Use `ssh-copy-id` when it
+is available:
+
+```bash
+ssh-copy-id -i "$HOME/.ssh/pocketdeck_id_rsa.pub" USER@HOST
+```
+
+Alternatively, append it with ordinary SSH:
+
+```bash
+cat "$HOME/.ssh/pocketdeck_id_rsa.pub" | \
+  ssh USER@HOST 'umask 077; mkdir -p ~/.ssh; cat >> ~/.ssh/authorized_keys'
+```
+
+Confirm that the same key works from the build computer before flashing:
+
+```bash
+ssh -i "$HOME/.ssh/pocketdeck_id_rsa" USER@HOST
+```
+
+Select that private key for the Pocket Deck build and flash the firmware:
+
+```bash
+export POCKETDECK_SSH_KEY="$HOME/.ssh/pocketdeck_id_rsa"
+pio run -e cardputer-adv
+pio run -e cardputer-adv -t upload
+```
+
+Without `POCKETDECK_SSH_KEY`, the build script automatically tries
+`~/.ssh/id_rsa`. Look for `[ssh-key] private key available` in the PlatformIO
+output. The script creates the generated byte-array header only under the
+ignored `.pio/` directory; it never copies the private key into tracked source.
+
+The generated firmware binary **does contain the complete private key**. Do not
+commit or publish firmware binaries, and do not share a binary built with your
+key. Factory reset clears saved SSH host records but cannot remove the compiled
+key; replacing or removing it requires rebuilding and reflashing. If the device
+or firmware is exposed, remove the corresponding public key from every server's
+`authorized_keys` file.
+
+Terminal controls:
+
+| Control | SSH terminal action |
 |---|---|
-| `HELP` | List the available serial-console commands |
-| `LOG STATUS` | Show card, capacity, logger, and write status |
-| `LOG DUMP` | Print the current `/PocketDeck/ble.log` |
-| `LOG DUMP ALL` | Print the rotated log followed by the current log |
-| `LOG CLEAR YES` | Erase both logs and immediately begin a new session |
+| Ordinary keys / Shift | Send text |
+| Ctrl + A … Z | Send control byte, including Ctrl+C and Ctrl+D |
+| Enter / Backspace / Tab | CR / DEL / Tab |
+| Fn + `` ` `` | Escape |
+| Fn + Backspace | Forward Delete |
+| Fn + `;` `,` `.` `/` | Up / Left / Down / Right |
+| Fn + Tab | Open quick commands (`uptime`, `df -h`, `free -h`, `docker ps`) |
+| Opt + Fn + `;` / `.` | Scroll local history up / down |
+| G0 | Home and disconnect |
 
-`LOG CLEAR` without the final `YES` is deliberately rejected.
+The first version provides one interactive 40×13 PTY and 64 lines of local
+scrollback. It implements a practical ANSI/VT100 subset; complex full-screen
+programs and non-ASCII text may not render perfectly.
+
+Per the current device-owner decision, SSH server host-key verification is
+temporarily disabled. This permits man-in-the-middle attacks on an untrusted
+network. The intended follow-up is TOFU fingerprint storage. The private key and
+terminal input/output are never written to diagnostics or TF logs.
+
+## Wi-Fi, clock, and weather
+
+Open Settings > Wi-Fi > Scan networks. Results are strongest first; `S` marks a
+saved network. Select a new secured network to enter its password locally, or
+select an `S` row to reconnect without typing it again.
+
+Pocket Deck stores up to eight successful profiles. Failed credentials are not
+saved. At boot and after link loss it scans all visible SSIDs, tries saved
+networks by signal strength, falls back after a timeout, and rescans every 15
+seconds if none are available. Saved networks allows individual deletion;
+Factory reset removes all profiles.
+
+Only 2.4 GHz networks are supported. Passwords remain on the device and are
+never included in BLE reports, weather requests, screen diagnostics, or logs.
+
+After connection, NTP supplies the status-bar clock. Weather uses a fresh GPS
+position to retrieve current conditions, feels-like temperature, humidity,
+wind, daily high/low, and sunrise/sunset from
+[Open-Meteo](https://open-meteo.com/en/docs). Successful weather data remains
+visible from RAM when GPS or Wi-Fi later disappears; fresh inputs are required
+only for the next update.
 
 ## GPS / GNSS
 
-The GPS app supports the M5Stack Cap LoRa-1262 attached to the Cardputer Adv
-14-pin expansion connector. Its ATGM336H/AT6668 receiver sends NMEA 0183 4.1 at
-115200 baud. Pocket Deck reads Cap `GPS_TX` on GPIO15 and assigns GPIO13 as the
-return UART pin. The GPS service runs continuously in the background, including
-while Home, Keyboard, or Settings is visible.
+Attach the optional Cap LoRa-1262 and open GPS. Pocket Deck reads its NMEA stream
+at 115200 baud on GPIO15 (RX) and GPIO13 (TX). Parsing continues in the
+background.
 
-Select GPS in Home and press Enter. Use Fn+`,` / Fn+`/` or Tab to move through
-three pages:
+Use Left/Right or Tab across four pages:
 
-1. Position: fix state, latitude, longitude, altitude, satellites, HDOP, fix
-   age, and incoming-data age.
-2. Motion/time: UTC date and time, speed in km/h, course in degrees and an
-   eight-point compass direction, plus fix mode and quality.
-3. Receiver: UART configuration, NMEA character count, valid sentence count,
-   checksum error count, and sentences containing a fix.
+1. Position, altitude, satellites, HDOP, and fix age.
+2. UTC date/time, speed, course, direction, mode, and quality.
+3. UART state, received characters, valid checksums, checksum errors, and fix
+   sentence counts.
+4. Large speed in `KM/H` and course in degrees plus compass point. A stale or
+   invalid motion field displays `--`.
 
-The status distinguishes `NO DATA`, `NO STREAM`, `SEARCHING`, `STALE FIX`, and
-`FIX`. On the receiver page:
+`RX CHARS` rising proves bytes are arriving; `CHECKSUM OK` rising proves valid
+NMEA. A valid stream can still show `SEARCHING` until the ceramic antenna has a
+clear outdoor view and acquires satellites. Cold starts can take several
+minutes.
 
-- `RX CHARS` rising means bytes are arriving from the Cap.
-- `CHECKSUM OK` rising means the baud rate and NMEA stream are valid.
-- `CHECKSUM ERR` rising rapidly while OK remains zero suggests corrupted input
-  or an incorrect module configuration.
+## LoRa text terminal
 
-GPS time is displayed as UTC rather than silently applying a local timezone.
-The Cap uses a built-in ceramic GNSS antenna; first position acquisition should
-be tested outdoors with a broad view of the sky. A cold start can take minutes
-in real conditions even though valid NMEA data appears immediately.
+With the optional Cap LoRa-1262 attached, open LORA from Home. **Attach the Cap
+antenna before opening LORA, initializing the radio, or transmitting.** Enter
+printable ASCII into the 120-byte draft, use Backspace to edit, Enter to send a
+non-empty draft while `LISTENING`, and Fn+`` ` `` to return Home. A busy radio
+rejects additional Enter presses rather than queueing duplicates.
 
-## Wi-Fi, NTP, and network diagnostics
+This is raw LoRa P2P, not LoRaWAN. It transmits exact draft bytes without a
+Pocket Deck header and uses no encryption, ACKs, addressing, retries, or delivery
+guarantee. It is half-duplex. A second SX1262 endpoint running RadioLib with the
+same profile is required for interoperability: **868.0 MHz, 125.0 kHz, SF12,
+coding rate 4/5, sync word `0x34`, +22 dBm, 20-symbol preamble, 3.0 V TCXO, and
+140 mA current limit**. Check that this RF configuration is permitted where you
+use it.
 
-Open Settings > Wi-Fi. The Wi-Fi page provides an on/off switch, asynchronous
-network scan, network diagnostics, and a confirmed forget action. Select a scan
-result and enter its password directly on the Cardputer. Password input remains
-local: it is masked on screen, never routed through BLE HID, and never written
-to serial or the diagnostic ring. Use Backspace to erase a character and
-Fn+Backtick to cancel entry.
+See the [LoRa text-terminal hardware checklist](docs/validation/lora-text-terminal-smoke-test.md)
+for the required two-endpoint, antenna, RF recovery, TF coexistence, and
+regression evidence. A successful build does not prove radio operation.
 
-The ESP32 Wi-Fi stack stores one selected station network in NVS. When Wi-Fi is
-enabled after restart, Pocket Deck reconnects using that saved configuration.
-Disabling Wi-Fi preserves it; Forget network and Factory reset erase it.
+## Diagnostics and TF card
 
-After connection Pocket Deck synchronizes UTC through NTP. Settings > Wi-Fi >
-Network info displays connection state, SDK status, SSID, RSSI, local IP,
-gateway, DNS, and NTP UTC time. The status-bar clock displays UTC+8 and keeps
-advancing for the rest of the current boot if Wi-Fi later disconnects. Scanning
-and connecting are non-blocking so the BLE keyboard and UI continue running
-while Wi-Fi changes state.
+Settings > System > Diagnostics shows reset reason, memory and recent events.
+For persistent history, insert a TF card and restart. The active log is
+`/PocketDeck/ble.log`; it rotates at 512 KB to `ble-prev.log`. Despite the
+filename, it also contains system, Wi-Fi, GPS, weather, and storage events.
 
-## Weather
+Settings > System > TF card logs can retry mounting or format the card after a
+separate confirmation. Formatting erases the entire card.
 
-Weather uses the most recent valid GPS coordinates and the connected Wi-Fi
-network. It retrieves current temperature, apparent temperature, humidity,
-wind, WMO weather condition, today's high/low, and local sunrise/sunset from
-[Open-Meteo](https://open-meteo.com/en/docs). No API key is required. Press
-Enter to refresh manually; successful data refreshes automatically after 15
-minutes or after moving roughly 0.05 degrees.
+Logs can be read over USB without removing the card:
 
-The last successful forecast remains visible in RAM if GPS or Wi-Fi later
-disconnects. Its footer changes from `LIVE` to an amber cached status with its
-age and the missing input. A failed refresh also preserves the previous data.
-Fresh GPS and Wi-Fi are required to update the forecast, not to view it. The
-cache is cleared on restart.
+| Serial command | Action |
+|---|---|
+| `HELP` | List commands |
+| `LOG STATUS` | Show card/logger state |
+| `LOG DUMP` | Print the current log |
+| `LOG DUMP ALL` | Print previous and current logs |
+| `LOG CLEAR YES` | Erase both logs and start a new session |
 
-The HTTPS request runs in a separate FreeRTOS task so a slow forecast endpoint
-does not block keyboard input or rendering. This first implementation accepts
-the endpoint certificate without pinning because it transmits only public
-coordinates and receives public forecast data; it sends no Wi-Fi password,
-typed content, token, or other secret.
+Typed keyboard content, Wi-Fi passwords, pairing codes, and precise GPS
+coordinates are deliberately excluded from diagnostics.
 
-## Bluetooth, Wi-Fi, and System settings
+## Reset and stored data
 
-Open Settings from Home, select a category with Up/Down, and press Enter.
-
-Bluetooth provides:
-
-- BLE enabled state, connection state, device name, local host label,
-  encryption state, and bond state.
-- `Disconnect`, which drops the current link but preserves the Mac bond.
-- `Forget host`, which requires Enter on a confirmation page, disconnects,
-  removes the one BLE bond, generates a new pairing code, and advertises again.
-
-System provides:
-
-- Firmware version, reset reason, uptime, free heap, minimum free heap, and the
-  five newest entries from a fixed 12-entry diagnostic ring.
-- `Restart`, protected by a confirmation page.
-- `Factory reset`, protected by a separate confirmation page. It clears the
-  `pocketdeck` application settings namespace, saved Wi-Fi network, and BLE
-  bond, then restarts.
-
-Settings are stored as a versioned, checksummed Preferences/NVS record. BLE
-bond keys remain owned by the BLE stack and are never copied into application
-settings. Missing or invalid settings safely restore defaults.
+- Restart preserves settings, Wi-Fi profiles, and the BLE bond.
+- Disabling Wi-Fi preserves profiles; Saved networks deletes one selected SSID.
+- Forget host removes the single BLE bond and starts a new pairing flow.
+- Factory reset clears application settings, all Wi-Fi profiles, all SSH host
+  entries, and the BLE bond, then restarts. It does not format the TF card and
+  cannot remove the private key compiled into firmware.
 
 ## Troubleshooting
 
-- **No device in macOS Bluetooth:** open Keyboard and verify it says `PAIRING`
-  or `ADVERTISING`, then verify Bluetooth is ON in Quick Settings or Settings.
-- **Connected but no typing:** Keyboard must be the foreground app and its
-  screen must say `CONNECTED`. Home and Settings always consume keys locally.
-- **A different computer cannot pair:** Pocket Deck is intentionally single-host.
-  Use Settings > Bluetooth > Forget host, confirm it, and pair the new Mac.
-- **Reconnect behaves strangely:** use Disconnect first. Use Forget host only
-  when deliberately replacing or repairing the bond.
-- **Serial shows little after reset:** native USB may re-enumerate after early
-  boot logs. Read Settings > System > Diagnostics or open the monitor before a
-  manual reset.
-- **GPS stays at `NO DATA`:** verify the Cap is fully seated and open GPS page
-  3/3. `RX CHARS` must increase. This firmware expects the Cap LoRa-1262 default
-  115200-baud configuration.
-- **GPS says `SEARCHING`:** the serial/NMEA path is working; move outdoors with
-  the ceramic antenna facing open sky and allow time for a cold start.
-- **Wi-Fi scan is empty:** confirm Wi-Fi is ON, press Tab to scan again, and
-  remember the ESP32-S3 supports 2.4 GHz networks rather than 5 GHz-only SSIDs.
-- **Weather waits for GPS:** Weather deliberately requires a fresh GPS fix; open
-  GPS outdoors before requesting a location-based forecast.
-- **Weather reports an HTTP error:** inspect Settings > Wi-Fi > Network info,
-  confirm NTP/IP are available, then press Enter in Weather to retry.
-- **Need a clean compile:** run `pio run -e cardputer-adv -t clean`, then build
-  again. A full flash erase is not part of the normal update path.
+- **No Bluetooth device:** open Keyboard and confirm Bluetooth is enabled and the
+  screen says `PAIRING` or `ADVERTISING`.
+- **Connected but not typing:** Keyboard must be foreground and show `CONNECTED`.
+- **Another Mac cannot pair:** remove the existing bond with Forget host first.
+- **Wi-Fi list is empty:** ensure Wi-Fi is on, open Scan networks, press Tab, and
+  verify the access point offers 2.4 GHz.
+- **GPS says `NO DATA`:** reseat the Cap and check page 3/4; `RX CHARS` must rise.
+- **GPS remains `SEARCHING`:** test outdoors with the antenna facing open sky.
+- **LORA says `RADIO NOT FOUND`:** confirm the Cap is seated and its antenna is
+  attached before retrying. Do not transmit without an antenna.
+- **Weather will not update:** verify a fresh GPS fix, Wi-Fi/IP, and NTP, then
+  press Enter in Weather.
+- **SSH key missing:** rebuild with a readable `POCKETDECK_SSH_KEY` path or
+  `~/.ssh/id_rsa`.
+- **SSH authentication fails:** add the matching public key to the remote
+  account's `authorized_keys`, then verify the on-device username and port.
+- **Early serial output is missing:** native USB re-enumerates after reset; use
+  on-device diagnostics or TF logs for boot history.
+- **Incremental build acts stale:** run `pio run -e cardputer-adv -t clean`, then
+  build again. A full flash erase is not a normal troubleshooting step.
 
-## Source layout
+## Development documentation
+
+- [Current project handoff](MEMORY.md)
+- [Agent/developer workflow](AGENTS.md)
+- [Architecture decisions](docs/architecture/)
+- [Hardware validation checklists](docs/validation/)
+- [GPS hardware checklist](docs/validation/gps-smoke-test.md)
+- [LoRa text-terminal checklist](docs/validation/lora-text-terminal-smoke-test.md)
+
+Source layout:
 
 ```text
-src/core/       system loop, app lifecycle, input routing, settings model
+src/core/       lifecycle, state, policies, input routing, portable models
 src/drivers/    Cardputer board and display adapters
-src/services/   BLE HID, Wi-Fi/NTP, weather HTTPS, GPS, Preferences, diagnostics
-src/ui/         Graphite Mint widgets and Quick Settings
-src/apps/       launcher, Keyboard, GPS, Weather, and Settings
+src/services/   BLE, Wi-Fi, SSH, GPS, LoRa, weather, NVS, TF diagnostics
+src/apps/       launcher, Keyboard, SSH, GPS, LORA, Weather, Settings
+src/ui/         shared status bar and Quick Settings
 test/native/    hardware-independent C++ tests
 ```
-
-Architecture decisions and repeatable hardware validation checklists are kept
-under `docs/`.

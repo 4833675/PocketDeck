@@ -8,6 +8,7 @@
 #include "apps/launcher/launcher_app.h"
 #include "apps/lora/lora_app.h"
 #include "apps/settings/settings_app.h"
+#include "apps/ssh/ssh_app.h"
 #include "apps/weather/weather_app.h"
 #include "core/g0_gesture.h"
 #include "core/input_router.h"
@@ -21,6 +22,8 @@
 #include "services/lora_service.h"
 #include "services/sd_log_service.h"
 #include "services/settings_store.h"
+#include "services/ssh_host_store.h"
+#include "services/ssh_service.h"
 #include "services/wifi_service.h"
 #include "services/weather_service.h"
 #include "ui/quick_settings.h"
@@ -61,6 +64,8 @@ private:
     SdLogService sdLog_;
     DiagnosticsService diagnostics_;
     SettingsStore settingsStore_;
+    SshHostStore sshHostStore_;
+    SshService ssh_;
     SystemSettings settings_ = SystemSettings::defaults();
     InputRouter inputRouter_;
     G0Gesture g0Gesture_;
@@ -70,6 +75,7 @@ private:
     GpsApp gpsApp_;
     LoRaApp loraApp_;
     WeatherApp weatherApp_;
+    SshApp sshApp_;
     SettingsApp settingsApp_;
     QuickSettings quickSettings_;
     App* current_ = nullptr;
@@ -79,6 +85,7 @@ private:
     bool lastGpsStateValid_ = false;
     WifiState lastWifiState_ = WifiState::Disabled;
     bool lastWifiStateValid_ = false;
+    uint32_t lastWifiScanGeneration_ = 0;
     WeatherState lastWeatherState_ = WeatherState::Idle;
     bool lastWeatherStateValid_ = false;
     std::array<char, 48> serialCommandBuffer_{};

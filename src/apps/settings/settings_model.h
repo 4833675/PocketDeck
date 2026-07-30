@@ -16,6 +16,7 @@ enum class SettingsPage : uint8_t {
     Categories,
     Wifi,
     WifiNetworks,
+    WifiSavedNetworks,
     WifiPassword,
     WifiDiagnostics,
     Bluetooth,
@@ -35,6 +36,7 @@ enum class SettingsEffect : uint8_t {
     ToggleWifi,
     StartWifiScan,
     SelectWifiNetwork,
+    SelectWifiForForget,
     ForgetWifi,
     ToggleBluetooth,
     DisconnectBluetooth,
@@ -52,7 +54,8 @@ struct SettingsResult {
 class SettingsModel {
 public:
     void reset();
-    SettingsResult handle(InputAction action, uint8_t wifiNetworkCount = 0);
+    SettingsResult handle(InputAction action, uint8_t wifiNetworkCount = 0,
+                          uint8_t wifiSavedNetworkCount = 0);
     void openWifiPassword();
     void cancelWifiPassword();
     void finishWifiConnection();

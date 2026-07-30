@@ -8,6 +8,7 @@ enum class AppId : uint8_t {
     None,
     Launcher,
     Keyboard,
+    Ssh,
     Gps,
     LoRa,
     Weather,

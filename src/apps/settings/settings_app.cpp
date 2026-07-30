@@ -156,8 +156,8 @@ void drawWifi(M5Canvas& canvas, const SettingsModel& model, const WifiSnapshot& 
     drawChoice(canvas, 22, wifi.enabled ? "Wi-Fi  ON" : "Wi-Fi  OFF",
                model.selectedRow() == 0);
     drawChoice(canvas, 44, "Scan networks", model.selectedRow() == 1);
-    drawChoice(canvas, 66, "Network info", model.selectedRow() == 2);
-    drawChoice(canvas, 88, "Forget network", model.selectedRow() == 3);
+    drawChoice(canvas, 66, "Saved networks", model.selectedRow() == 2);
+    drawChoice(canvas, 88, "Network info", model.selectedRow() == 3);
 
     canvas.setTextDatum(top_left);
     canvas.setTextColor(wifiStateColor(wifi), theme::kBackground);
@@ -208,7 +208,8 @@ void drawWifiNetworks(M5Canvas& canvas, const SettingsModel& model,
             canvas.fillRoundRect(6, y, 228, 16, 3, background);
             if (active) canvas.drawRoundRect(6, y, 228, 16, 3, theme::kPrimary);
             char line[52];
-            std::snprintf(line, sizeof(line), "%c %-24.24s %4ld",
+            std::snprintf(line, sizeof(line), "%c%c %-22.22s %4ld",
+                          wifi.networks[index].saved ? 'S' : ' ',
                           wifi.networks[index].secured ? '*' : 'o',
                           wifi.networks[index].ssid.data(),
                           static_cast<long>(wifi.networks[index].rssi));
@@ -217,7 +218,37 @@ void drawWifiNetworks(M5Canvas& canvas, const SettingsModel& model,
             canvas.drawString(line, 11, y + 8);
         }
     }
-    drawHint(canvas, "FN+;/. MOVE  ENTER CONNECT  TAB SCAN  DEL BACK");
+    drawHint(canvas, "S=SAVED  ENTER CONNECT  TAB SCAN  DEL BACK");
+}
+
+void drawWifiSavedNetworks(M5Canvas& canvas, const SettingsModel& model,
+                           const WifiSnapshot& wifi) {
+    canvas.setTextDatum(top_left);
+    if (wifi.savedNetworkCount == 0) {
+        canvas.setTextColor(theme::kMuted, theme::kBackground);
+        canvas.drawString("No saved networks", 8, 27);
+        canvas.drawString("Connect from Scan networks", 8, 47);
+    } else {
+        const uint8_t selected =
+            std::min<uint8_t>(model.selectedRow(), wifi.savedNetworkCount - 1);
+        const uint8_t start = selected >= 5 ? selected - 4 : 0;
+        const uint8_t end = std::min<uint8_t>(wifi.savedNetworkCount, start + 5);
+        for (uint8_t index = start; index < end; ++index) {
+            const bool active = index == selected;
+            const int16_t y = 23 + static_cast<int16_t>(index - start) * 18;
+            const uint16_t background = active ? theme::kPanelRaised : theme::kBackground;
+            canvas.fillRoundRect(6, y, 228, 16, 3, background);
+            if (active) canvas.drawRoundRect(6, y, 228, 16, 3, theme::kPrimary);
+            char line[44];
+            std::snprintf(line, sizeof(line), "%u  %.28s",
+                          static_cast<unsigned>(index + 1),
+                          wifi.savedNetworks[index].ssid.data());
+            canvas.setTextDatum(middle_left);
+            canvas.setTextColor(active ? theme::kText : theme::kMuted, background);
+            canvas.drawString(line, 11, y + 8);
+        }
+    }
+    drawHint(canvas, "FN+;/. MOVE  ENTER FORGET  DEL BACK");
 }
 
 void drawWifiPassword(M5Canvas& canvas, const char* ssid, const char* password) {
@@ -244,7 +275,7 @@ void drawWifiPassword(M5Canvas& canvas, const char* ssid, const char* password) 
     canvas.setTextDatum(top_left);
     canvas.setTextColor(theme::kMuted, theme::kBackground);
     canvas.drawString(count, 8, 91);
-    canvas.drawString("Stored by ESP32 Wi-Fi only", 105, 91);
+    canvas.drawString("Saved only on this device", 105, 91);
     drawHint(canvas, "TYPE  ENTER CONNECT  DEL ERASE  FN+` CANCEL");
 }
 
@@ -389,12 +420,13 @@ void drawDiagnostics(M5Canvas& canvas, const SystemContext& context) {
     drawHint(canvas, "DEL BACK");
 }
 
-void drawConfirmation(M5Canvas& canvas, SettingsPage page) {
+void drawConfirmation(M5Canvas& canvas, SettingsPage page, const char* wifiSsid) {
     const char* title = "FORGET PAIRED HOST?";
     const char* detail = "Disconnect and pair a new Mac";
     if (page == SettingsPage::ConfirmForgetWifi) {
         title = "FORGET WI-FI NETWORK?";
-        detail = "Erase the saved password";
+        detail = wifiSsid != nullptr && wifiSsid[0] != '\0' ? wifiSsid
+                                                             : "Erase saved password";
     } else if (page == SettingsPage::ConfirmRestart) {
         title = "RESTART POCKET DECK?";
         detail = "Current settings are preserved";
@@ -453,7 +485,8 @@ void SettingsApp::onInput(const InputEvent& event, SystemContext& context) {
 
     const WifiSnapshot wifi = context.wifi != nullptr ? context.wifi->snapshot()
                                                        : WifiSnapshot{};
-    const SettingsResult result = model_.handle(event.action, wifi.networkCount);
+    const SettingsResult result =
+        model_.handle(event.action, wifi.networkCount, wifi.savedNetworkCount);
     switch (result.effect) {
         case SettingsEffect::None: break;
         case SettingsEffect::GoHome: context.requestApp(AppId::Launcher); break;
@@ -468,7 +501,10 @@ void SettingsApp::onInput(const InputEvent& event, SystemContext& context) {
             std::strncpy(selectedSsid_.data(), wifi.networks[index].ssid.data(),
                          selectedSsid_.size() - 1);
             wifiPassword_.fill('\0');
-            if (wifi.networks[index].secured) {
+            if (wifi.networks[index].saved) {
+                context.requestWifiConnect(selectedSsid_.data(), "");
+                model_.finishWifiConnection();
+            } else if (wifi.networks[index].secured) {
                 model_.openWifiPassword();
             } else {
                 context.requestWifiConnect(selectedSsid_.data(), "");
@@ -476,8 +512,18 @@ void SettingsApp::onInput(const InputEvent& event, SystemContext& context) {
             }
             break;
         }
+        case SettingsEffect::SelectWifiForForget: {
+            if (wifi.savedNetworkCount == 0) break;
+            const uint8_t index =
+                std::min<uint8_t>(model_.selectedRow(), wifi.savedNetworkCount - 1);
+            selectedSsid_.fill('\0');
+            std::strncpy(selectedSsid_.data(), wifi.savedNetworks[index].ssid.data(),
+                         selectedSsid_.size() - 1);
+            break;
+        }
         case SettingsEffect::ForgetWifi:
-            context.requestCommand(SystemCommand::ForgetWifi);
+            context.requestWifiForget(selectedSsid_.data());
+            selectedSsid_.fill('\0');
             break;
         case SettingsEffect::ToggleBluetooth:
             context.requestCommand(SystemCommand::ToggleBluetooth);
@@ -511,6 +557,9 @@ void SettingsApp::render(Display& display, const SystemContext& context) {
         case SettingsPage::Categories: drawCategories(canvas, model_, context, wifi, ble); break;
         case SettingsPage::Wifi: drawWifi(canvas, model_, wifi); break;
         case SettingsPage::WifiNetworks: drawWifiNetworks(canvas, model_, wifi); break;
+        case SettingsPage::WifiSavedNetworks:
+            drawWifiSavedNetworks(canvas, model_, wifi);
+            break;
         case SettingsPage::WifiPassword:
             drawWifiPassword(canvas, selectedSsid_.data(), wifiPassword_.data());
             break;
@@ -523,7 +572,9 @@ void SettingsApp::render(Display& display, const SystemContext& context) {
         case SettingsPage::ConfirmForgetHost:
         case SettingsPage::ConfirmRestart:
         case SettingsPage::ConfirmFormatStorage:
-        case SettingsPage::ConfirmFactoryReset: drawConfirmation(canvas, model_.page()); break;
+        case SettingsPage::ConfirmFactoryReset:
+            drawConfirmation(canvas, model_.page(), selectedSsid_.data());
+            break;
     }
 }
 

@@ -1,6 +1,6 @@
 # Pocket Deck GPS Hardware Smoke Test
 
-Target firmware: `0.3.0` or later
+Target firmware: `0.4.0` or later
 
 Hardware: M5Stack Cardputer Adv + Cap LoRa-1262
 
@@ -12,7 +12,7 @@ rows outdoors with the Cap's ceramic GNSS antenna facing open sky.
 | ID | Test | Expected | Result | Notes |
 |---|---|---|---|---|
 | GPS-01 | Boot with Cap attached | Home loads normally; BLE remains available | Pending | |
-| GPS-02 | Launcher | GPS card appears between Keyboard and Settings | Pending | |
+| GPS-02 | Launcher | GPS card appears between Keyboard and Weather | Pending | |
 | GPS-03 | UART stream | GPS 3/4 `RX CHARS` rises continuously | Pending | |
 | GPS-04 | NMEA validity | `CHECKSUM OK` rises; ERR does not dominate | Pending | |
 | GPS-05 | UTC before fix | UTC time/date appears when supplied by receiver | Pending | |

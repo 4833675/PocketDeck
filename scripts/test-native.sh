@@ -37,9 +37,16 @@ for source in src/core/input_router.cpp src/core/g0_gesture.cpp src/core/system_
               src/apps/gps/gps_app_model.cpp \
               src/apps/lora/lora_app_model.cpp \
               src/core/serial_command.cpp \
+              src/core/ssh_error_detail.cpp \
+              src/core/ssh_hosts.cpp \
+              src/core/ssh_host_record.cpp \
+              src/core/terminal_buffer.cpp \
+              src/core/terminal_input.cpp \
               src/core/wifi_data.cpp \
+              src/core/wifi_profiles.cpp \
               src/core/weather_data.cpp \
               src/apps/launcher/launcher_model.cpp \
+              src/apps/ssh/ssh_app_model.cpp \
               src/apps/settings/settings_model.cpp src/services/diagnostics_service.cpp \
               src/ui/quick_settings_model.cpp; do
     if [[ -f "$source" ]]; then

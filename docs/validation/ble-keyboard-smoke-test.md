@@ -1,6 +1,6 @@
 # Pocket Deck BLE Keyboard Hardware Smoke Test
 
-This is a reusable hardware-validation template for Pocket Deck `0.3.0` or
+This is a reusable hardware-validation template for Pocket Deck `0.4.0` or
 later. Automated tests and a successful firmware link do not mark a hardware
 row as passed. Fill in every result after flashing a real M5Stack Cardputer Adv.
 
@@ -11,7 +11,7 @@ row as passed. Fill in every result after flashing a real M5Stack Cardputer Adv.
 | Date / time | Pending |
 | Tester | Pending |
 | Firmware commit | Pending |
-| Firmware version | 0.3.0 or later |
+| Firmware version | 0.4.0 or later |
 | Cardputer model | M5Stack Cardputer Adv |
 | Mac model | Pending |
 | macOS version | Pending |
@@ -83,7 +83,7 @@ Do not use a shell, password field, chat, or document containing important data.
 | REC-04 | Forget confirmation cancel | Select Forget host, then Backspace | Bond remains and reconnect still works | Pending | |
 | REC-05 | Forget and re-pair | Select Forget host, confirm with Enter, then pair again | Old bond is removed, a new code appears, and the Mac can pair without flash erase | Pending | |
 | REC-06 | Restart confirmation | Select Restart, cancel once, then confirm | Cancel has no effect; confirm performs a clean software restart | Pending | |
-| REC-07 | Factory reset | Change Quick Settings, save Wi-Fi, ensure a bond exists, confirm Factory reset | App settings, Wi-Fi profile, and BLE bond clear; restart returns defaults and requires fresh pairing | Pending | |
+| REC-07 | Factory reset | Change Quick Settings, save Wi-Fi profiles, ensure a bond exists, confirm Factory reset | App settings, all Wi-Fi profiles, and BLE bond clear; restart returns defaults and requires fresh pairing | Pending | |
 | REC-08 | Post-reset identity | Compare the advertised device before and after Factory reset | Name/base device identity remains `Pocket Deck`; only settings/bond state reset | Pending | |
 
 ## Result summary

@@ -63,6 +63,8 @@ void System::begin() {
     context_.wifi = &wifi_;
     context_.weather = &weather_;
     context_.sdLog = &sdLog_;
+    context_.ssh = &ssh_;
+    context_.sshHostStore = &sshHostStore_;
     context_.diagnostics = &diagnostics_;
     context_.settings = &settings_;
     diagnostics_.logf("Boot reset: %s", context_.resetReason);
@@ -239,6 +241,7 @@ void System::executeSerialCommand(const char* command) {
 App* System::appForId(AppId id) {
     if (id == AppId::Launcher) return &launcher_;
     if (id == AppId::Keyboard) return &keyboard_;
+    if (id == AppId::Ssh) return &sshApp_;
     if (id == AppId::Gps) return &gpsApp_;
     if (id == AppId::LoRa) return &loraApp_;
     if (id == AppId::Weather) return &weatherApp_;
@@ -304,9 +307,15 @@ void System::handleSystemCommand(SystemCommand command) {
             return;
         }
         case SystemCommand::ForgetWifi:
-            diagnostics_.log(wifi_.forgetNetwork() ? "WiFi network forgotten"
-                                                   : "WiFi forget failed");
+        {
+            std::array<char, WifiConnectRequest::kSsidCapacity> ssid{};
+            const bool targeted = context_.takeWifiForgetRequest(ssid);
+            const bool forgotten = wifi_.forgetNetwork(targeted ? ssid.data() : nullptr);
+            diagnostics_.logf("WiFi forget %s: %s",
+                              targeted ? ssid.data() : "all networks",
+                              forgotten ? "complete" : "failed");
             return;
+        }
         case SystemCommand::ToggleBluetooth:
             settings_.bleEnabled = !settings_.bleEnabled;
             bleKeyboard_.setEnabled(settings_.bleEnabled);
@@ -350,10 +359,11 @@ void System::handleSystemCommand(SystemCommand command) {
             diagnostics_.log("Factory reset confirmed");
             const bool settingsCleared = settingsStore_.clear();
             const bool wifiCleared = wifi_.forgetNetwork();
+            const bool sshHostsCleared = sshHostStore_.clear();
             const bool bondCleared = bleKeyboard_.forgetHost();
-            diagnostics_.logf("Factory clear: settings=%d wifi=%d bond=%d",
+            diagnostics_.logf("Factory clear: settings=%d wifi=%d ssh=%d bond=%d",
                               settingsCleared ? 1 : 0, wifiCleared ? 1 : 0,
-                              bondCleared ? 1 : 0);
+                              sshHostsCleared ? 1 : 0, bondCleared ? 1 : 0);
             delay(100);
             ESP.restart();
             return;
@@ -411,6 +421,20 @@ void System::trackWifiState(const WifiSnapshot& snapshot) {
         diagnostics_.logf("WiFi state: %s", wifiStateLabel(snapshot.state));
         lastWifiState_ = snapshot.state;
         lastWifiStateValid_ = true;
+    }
+    if (snapshot.scanGeneration != lastWifiScanGeneration_) {
+        if (snapshot.lastScanResult >= 0) {
+            diagnostics_.logf("WiFi scan complete: raw=%d visible=%u saved=%u candidates=%u",
+                              static_cast<int>(snapshot.lastScanResult),
+                              static_cast<unsigned>(snapshot.networkCount),
+                              static_cast<unsigned>(snapshot.savedNetworkCount),
+                              static_cast<unsigned>(snapshot.autoCandidateCount));
+        } else {
+            diagnostics_.logf("WiFi scan failed: result=%d status=%d",
+                              static_cast<int>(snapshot.lastScanResult),
+                              static_cast<int>(snapshot.lastStatus));
+        }
+        lastWifiScanGeneration_ = snapshot.scanGeneration;
     }
     if (snapshot.ntpSynced && snapshot.utcEpoch > 0) {
         static bool loggedTimeSync = false;

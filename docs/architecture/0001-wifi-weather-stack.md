@@ -1,7 +1,9 @@
 # ADR-0001: Wi-Fi and GPS-local weather stack
 
-**Status:** Accepted  
-**Date:** 2026-07-24  
+**Status:** Accepted; single-profile Wi-Fi portion superseded by ADR-0002
+
+**Date:** 2026-07-24
+
 **Decider:** KEXIN
 
 ## Context
@@ -14,11 +16,13 @@ while Wi-Fi scans or performs HTTPS requests.
 ## Decision
 
 - `WifiService` owns the ESP32 station radio, asynchronous scans, connection
-  state, the one saved station profile, NTP setup, and a fixed-size snapshot.
+  state, NTP setup, and a fixed-size snapshot. Multi-profile persistence and
+  reconnect selection are defined by ADR-0002.
 - Settings renders snapshots and sends operations to `System`; password entry
   uses a separate local text input mode and never produces HID reports.
-- The ESP32 Wi-Fi stack persists credentials in NVS. Application settings store
-  only the Wi-Fi enabled flag.
+- Application settings store only the Wi-Fi enabled flag. Credential persistence
+  was moved from the ESP32 station slot to Pocket Deck's own NVS record in
+  ADR-0002.
 - `WeatherService` requests Open-Meteo in a short-lived FreeRTOS task and
   publishes a fixed-size snapshot under a critical section.
 - Weather refreshes from a fresh GPS position and never substitutes an inferred
@@ -51,5 +55,5 @@ for the first implementation in favor of Open-Meteo's keyless forecast API.
 - Wi-Fi passwords remain out of application logs and BLE reports.
 - Wi-Fi and BLE still share the ESP32-S3 2.4 GHz radio, so scans are explicit
   rather than continuous.
-- Future certificate verification, captive-portal provisioning, SSH, MQTT, and
+- Future certificate verification, captive-portal provisioning, MQTT, and
   Home Assistant can extend the service layer without changing app ownership.

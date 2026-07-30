@@ -10,6 +10,7 @@ namespace pd {
 enum class InputMode : uint8_t {
     System,
     Text,
+    Terminal,
     Keyboard,
 };
 
@@ -23,6 +24,11 @@ enum class InputAction : uint8_t {
     Back,
     Erase,
     Tab,
+    Escape,
+    DeleteForward,
+    QuickCommands,
+    ScrollUp,
+    ScrollDown,
 };
 
 struct InputEvent {

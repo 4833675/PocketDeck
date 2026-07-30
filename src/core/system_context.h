@@ -13,6 +13,8 @@ class DiagnosticsService;
 class GpsService;
 class LoRaService;
 class SdLogService;
+class SshHostStore;
+class SshService;
 class WifiService;
 class WeatherService;
 struct SystemSettings;
@@ -61,6 +63,8 @@ struct SystemContext {
     WifiService* wifi = nullptr;
     WeatherService* weather = nullptr;
     SdLogService* sdLog = nullptr;
+    SshService* ssh = nullptr;
+    SshHostStore* sshHostStore = nullptr;
     DiagnosticsService* diagnostics = nullptr;
     const SystemSettings* settings = nullptr;
 
@@ -101,10 +105,29 @@ struct SystemContext {
         return true;
     }
 
+    void requestWifiForget(const char* ssid) {
+        wifiForgetSsid_.fill('\0');
+        if (ssid != nullptr) {
+            std::strncpy(wifiForgetSsid_.data(), ssid, wifiForgetSsid_.size() - 1);
+        }
+        wifiForgetPending_ = true;
+        requestedCommand_ = SystemCommand::ForgetWifi;
+    }
+
+    bool takeWifiForgetRequest(std::array<char, WifiConnectRequest::kSsidCapacity>& ssid) {
+        if (!wifiForgetPending_) return false;
+        ssid = wifiForgetSsid_;
+        wifiForgetSsid_.fill('\0');
+        wifiForgetPending_ = false;
+        return true;
+    }
+
 private:
     SystemCommand requestedCommand_ = SystemCommand::None;
     WifiConnectRequest wifiConnectRequest_{};
     bool wifiConnectPending_ = false;
+    std::array<char, WifiConnectRequest::kSsidCapacity> wifiForgetSsid_{};
+    bool wifiForgetPending_ = false;
 };
 
 }  // namespace pd

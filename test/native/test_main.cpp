@@ -1,13 +1,15 @@
 #include "test_harness.h"
 
 #include <array>
+#include <cstdio>
 #include <cstring>
 #include <utility>
 
-#include "apps/gps/gps_app_model.h"
 #include "apps/launcher/launcher_model.h"
+#include "apps/gps/gps_app_model.h"
 #include "apps/lora/lora_app_model.h"
 #include "apps/settings/settings_model.h"
+#include "apps/ssh/ssh_app_model.h"
 #include "core/ble_keyboard_policy.h"
 #include "core/clock_data.h"
 #include "core/g0_gesture.h"
@@ -17,10 +19,17 @@
 #include "core/input_router.h"
 #include "core/mac_keymap.h"
 #include "core/serial_command.h"
+#include "core/ssh_error_detail.h"
+#include "core/ssh_hosts.h"
+#include "core/ssh_host_record.h"
+#include "core/ssh_memory_budget.h"
 #include "core/system_settings.h"
+#include "core/terminal_buffer.h"
+#include "core/terminal_input.h"
 #include "core/text_keymap.h"
 #include "core/weather_data.h"
 #include "core/wifi_data.h"
+#include "core/wifi_profiles.h"
 #include "services/diagnostics_service.h"
 #include "ui/quick_settings_model.h"
 
@@ -42,6 +51,26 @@ void captureDiagnostic(void* context, const char* message) {
 }
 
 }  // namespace
+
+TEST_CASE(ssh_error_detail_redacts_endpoint_identity) {
+    std::array<char, 96> output{};
+    sanitizeSshErrorDetail("Timeout connecting to deck.example as kexin",
+                           "deck.example", "kexin", output.data(), output.size());
+    CHECK_STR_EQ(output.data(), "Timeout connecting to <host> as <user>");
+}
+
+TEST_CASE(ssh_error_detail_stays_single_line_and_never_partially_copies_secret) {
+    std::array<char, 24> output{};
+    sanitizeSshErrorDetail("failure\nprivate-hostname", "private-hostname", "",
+                           output.data(), output.size());
+    CHECK_STR_EQ(output.data(), "failure <host>");
+    CHECK(std::strstr(output.data(), "private") == nullptr);
+
+    std::array<char, 10> shortOutput{};
+    sanitizeSshErrorDetail("x private-hostname", "private-hostname", "",
+                           shortOutput.data(), shortOutput.size());
+    CHECK(std::strstr(shortOutput.data(), "private") == nullptr);
+}
 
 TEST_CASE(plain_a) {
     CHECK_EQ(MacKeymap::buildReport(KeyState{PhysicalKey::A}),
@@ -187,6 +216,97 @@ TEST_CASE(text_mode_is_local_and_uses_explicit_edit_actions) {
     CHECK_EQ(frame.events[0].action, InputAction::Back);
 }
 
+TEST_CASE(text_mode_uses_fn_navigation_to_move_between_fields) {
+    InputRouter router;
+    auto frame = router.update(KeyState{PhysicalKey::Fn, PhysicalKey::Semicolon},
+                               InputMode::Text, false);
+    CHECK_EQ(frame.eventCount, 1);
+    CHECK_EQ(frame.events[0].action, InputAction::Up);
+
+    router.reset();
+    frame = router.update(KeyState{PhysicalKey::Fn, PhysicalKey::Period},
+                          InputMode::Text, false);
+    CHECK_EQ(frame.eventCount, 1);
+    CHECK_EQ(frame.events[0].action, InputAction::Down);
+}
+
+TEST_CASE(text_mode_exposes_tab_for_multi_field_editors) {
+    InputRouter router;
+    const auto frame = router.update(KeyState{PhysicalKey::Tab}, InputMode::Text, false);
+    CHECK_EQ(frame.eventCount, 1);
+    CHECK_EQ(frame.events[0].action, InputAction::Tab);
+}
+
+TEST_CASE(terminal_mode_emits_local_printable_characters) {
+    InputRouter router;
+    const auto frame = router.update(KeyState{PhysicalKey::A}, InputMode::Terminal, true);
+    CHECK_EQ(frame.eventCount, 1);
+    CHECK_EQ(frame.events[0].character, 'a');
+    CHECK(!frame.hasHidReport);
+}
+
+TEST_CASE(terminal_mode_converts_ctrl_letters_to_control_bytes) {
+    InputRouter router;
+    const auto frame = router.update(
+        KeyState{PhysicalKey::Ctrl, PhysicalKey::C}, InputMode::Terminal, true);
+    CHECK_EQ(frame.eventCount, 1);
+    CHECK_EQ(static_cast<unsigned char>(frame.events[0].character), 0x03u);
+}
+
+TEST_CASE(terminal_mode_exposes_navigation_and_terminal_controls) {
+    InputRouter router;
+    auto frame = router.update(
+        KeyState{PhysicalKey::Fn, PhysicalKey::Semicolon}, InputMode::Terminal, false);
+    CHECK_EQ(frame.eventCount, 1);
+    CHECK_EQ(frame.events[0].action, InputAction::Up);
+
+    router.reset();
+    frame = router.update(KeyState{PhysicalKey::Fn, PhysicalKey::Backtick},
+                          InputMode::Terminal, false);
+    CHECK_EQ(frame.events[0].action, InputAction::Escape);
+
+    router.reset();
+    frame = router.update(KeyState{PhysicalKey::Fn, PhysicalKey::Backspace},
+                          InputMode::Terminal, false);
+    CHECK_EQ(frame.events[0].action, InputAction::DeleteForward);
+
+    router.reset();
+    frame = router.update(KeyState{PhysicalKey::Fn, PhysicalKey::Tab},
+                          InputMode::Terminal, false);
+    CHECK_EQ(frame.events[0].action, InputAction::QuickCommands);
+}
+
+TEST_CASE(terminal_mode_reserves_option_navigation_for_local_scrollback) {
+    InputRouter router;
+    auto frame = router.update(
+        KeyState{PhysicalKey::Opt, PhysicalKey::Fn, PhysicalKey::Semicolon},
+        InputMode::Terminal, false);
+    CHECK_EQ(frame.eventCount, 1);
+    CHECK_EQ(frame.events[0].action, InputAction::ScrollUp);
+
+    router.reset();
+    frame = router.update(
+        KeyState{PhysicalKey::Opt, PhysicalKey::Fn, PhysicalKey::Period},
+        InputMode::Terminal, false);
+    CHECK_EQ(frame.eventCount, 1);
+    CHECK_EQ(frame.events[0].action, InputAction::ScrollDown);
+}
+
+TEST_CASE(terminal_input_encodes_shell_control_sequences) {
+    CHECK_EQ(encodeTerminalInput({InputAction::None, 'x'}), TerminalInput::from("x"));
+    CHECK_EQ(encodeTerminalInput({InputAction::Confirm, '\0'}), TerminalInput::from("\r"));
+    CHECK_EQ(encodeTerminalInput({InputAction::Erase, '\0'}), TerminalInput::from("\x7f"));
+    CHECK_EQ(encodeTerminalInput({InputAction::Tab, '\0'}), TerminalInput::from("\t"));
+    CHECK_EQ(encodeTerminalInput({InputAction::Up, '\0'}), TerminalInput::from("\x1b[A"));
+    CHECK_EQ(encodeTerminalInput({InputAction::Down, '\0'}), TerminalInput::from("\x1b[B"));
+    CHECK_EQ(encodeTerminalInput({InputAction::Right, '\0'}), TerminalInput::from("\x1b[C"));
+    CHECK_EQ(encodeTerminalInput({InputAction::Left, '\0'}), TerminalInput::from("\x1b[D"));
+    CHECK_EQ(encodeTerminalInput({InputAction::Escape, '\0'}), TerminalInput::from("\x1b"));
+    CHECK_EQ(encodeTerminalInput({InputAction::DeleteForward, '\0'}),
+             TerminalInput::from("\x1b[3~"));
+    CHECK(encodeTerminalInput({InputAction::QuickCommands, '\0'}).empty());
+}
+
 TEST_CASE(keyboard_input_is_dropped_when_disconnected) {
     InputRouter router;
     auto frame = router.update(KeyState{PhysicalKey::A}, InputMode::Keyboard, false);
@@ -281,6 +401,8 @@ TEST_CASE(launcher_starts_on_keyboard_and_wraps) {
     LauncherModel model;
     CHECK_EQ(model.selected(), AppId::Keyboard);
     model.handle(InputAction::Right);
+    CHECK_EQ(model.selected(), AppId::Ssh);
+    model.handle(InputAction::Right);
     CHECK_EQ(model.selected(), AppId::Gps);
     model.handle(InputAction::Right);
     CHECK_EQ(model.selected(), AppId::LoRa);
@@ -297,6 +419,8 @@ TEST_CASE(launcher_starts_on_keyboard_and_wraps) {
 TEST_CASE(launcher_confirm_requests_selected_app) {
     LauncherModel model;
     CHECK_EQ(model.handle(InputAction::Confirm), AppId::Keyboard);
+    model.handle(InputAction::Right);
+    CHECK_EQ(model.handle(InputAction::Confirm), AppId::Ssh);
     model.handle(InputAction::Right);
     CHECK_EQ(model.handle(InputAction::Confirm), AppId::Gps);
     model.handle(InputAction::Right);
@@ -316,6 +440,356 @@ TEST_CASE(wifi_and_weather_labels_cover_visible_states) {
     CHECK_STR_EQ(weatherCodeLabel(0), "CLEAR");
     CHECK_STR_EQ(weatherCodeLabel(61), "RAIN");
     CHECK_STR_EQ(weatherCodeLabel(95), "THUNDERSTORM");
+}
+
+TEST_CASE(wifi_profiles_keep_eight_recent_networks_without_exposing_passwords) {
+    WifiProfiles profiles;
+    CHECK(profiles.empty());
+    CHECK(profiles.upsert("Home", "home-password"));
+    CHECK(profiles.upsert("Office", "office-password"));
+    CHECK_EQ(profiles.size(), 2u);
+    CHECK_STR_EQ(profiles.at(0).ssid.data(), "Office");
+    CHECK_STR_EQ(profiles.at(1).ssid.data(), "Home");
+
+    CHECK(profiles.touch("Home"));
+    CHECK_STR_EQ(profiles.at(0).ssid.data(), "Home");
+    CHECK(profiles.upsert("Office", "new-office-password"));
+    CHECK_STR_EQ(profiles.at(0).ssid.data(), "Office");
+    CHECK_STR_EQ(profiles.at(0).password.data(), "new-office-password");
+
+    for (int index = 0; index < 9; ++index) {
+        char ssid[12];
+        std::snprintf(ssid, sizeof(ssid), "Network-%d", index);
+        CHECK(profiles.upsert(ssid, "password"));
+    }
+    CHECK_EQ(profiles.size(), kWifiProfileCapacity);
+    CHECK(profiles.find("Network-0") == nullptr);
+    CHECK(profiles.find("Network-1") != nullptr);
+    CHECK_STR_EQ(profiles.at(0).ssid.data(), "Network-8");
+
+    CHECK(profiles.erase("Network-4"));
+    CHECK(profiles.find("Network-4") == nullptr);
+    CHECK_EQ(profiles.size(), kWifiProfileCapacity - 1);
+    CHECK(!profiles.erase("missing"));
+    profiles.clear();
+    CHECK(profiles.empty());
+}
+
+TEST_CASE(wifi_profiles_reject_empty_or_unterminated_credentials) {
+    WifiProfiles profiles;
+    CHECK(!profiles.upsert("", "password"));
+    CHECK(!profiles.upsert("Home", nullptr));
+    std::array<char, kWifiSsidCapacity> unterminatedSsid{};
+    unterminatedSsid.fill('x');
+    CHECK(!profiles.upsert(unterminatedSsid.data(), "password"));
+    std::array<char, kWifiPasswordCapacity> unterminatedPassword{};
+    unterminatedPassword.fill('x');
+    CHECK(!profiles.upsert("Home", unterminatedPassword.data()));
+}
+
+TEST_CASE(ssh_hosts_keep_six_recent_endpoints) {
+    SshHosts hosts;
+    CHECK(hosts.empty());
+    CHECK(hosts.upsert("Pi", "192.0.2.10", "deck", 22));
+    CHECK(hosts.upsert("Server", "example.test", "admin", 2222));
+    CHECK_EQ(hosts.size(), 2u);
+    CHECK_STR_EQ(hosts.at(0).label.data(), "Server");
+    CHECK_EQ(hosts.at(0).port, 2222u);
+
+    CHECK(hosts.upsert("Pi updated", "192.0.2.10", "deck", 22));
+    CHECK_EQ(hosts.size(), 2u);
+    CHECK_STR_EQ(hosts.at(0).label.data(), "Pi updated");
+
+    for (int index = 0; index < 7; ++index) {
+        char label[12];
+        char hostname[20];
+        std::snprintf(label, sizeof(label), "Host %d", index);
+        std::snprintf(hostname, sizeof(hostname), "host-%d.test", index);
+        CHECK(hosts.upsert(label, hostname, "deck", 22));
+    }
+    CHECK_EQ(hosts.size(), kSshHostCapacity);
+    CHECK_STR_EQ(hosts.at(0).hostname.data(), "host-6.test");
+    CHECK(hosts.find("host-0.test", "deck", 22) == nullptr);
+    CHECK(hosts.find("host-1.test", "deck", 22) != nullptr);
+}
+
+TEST_CASE(ssh_hosts_reject_blank_or_unterminated_fields) {
+    SshHosts hosts;
+    CHECK(!hosts.upsert("   ", "example.test", "deck", 22));
+    CHECK(!hosts.upsert("Server", "   ", "deck", 22));
+    CHECK(!hosts.upsert("Server", "example.test", "   ", 22));
+    CHECK(!hosts.upsert("Server", "example.test", "deck", 0));
+
+    std::array<char, kSshHostnameCapacity> unterminated{};
+    unterminated.fill('x');
+    CHECK(!hosts.upsert("Server", unterminated.data(), "deck", 22));
+}
+
+TEST_CASE(ssh_hosts_support_edit_delete_and_recent_order) {
+    SshHosts hosts;
+    CHECK(hosts.upsert("Pi", "pi.test", "deck", 22));
+    CHECK(hosts.upsert("Server", "server.test", "admin", 22));
+    CHECK(hosts.update(1, "Pi Lab", "pi.test", "deck", 2200));
+    CHECK_STR_EQ(hosts.at(1).label.data(), "Pi Lab");
+    CHECK_EQ(hosts.at(1).port, 2200u);
+
+    CHECK(hosts.touch(1));
+    CHECK_STR_EQ(hosts.at(0).label.data(), "Pi Lab");
+    CHECK(hosts.erase(0));
+    CHECK_EQ(hosts.size(), 1u);
+    CHECK_STR_EQ(hosts.at(0).label.data(), "Server");
+    CHECK(!hosts.touch(3));
+    CHECK(!hosts.erase(3));
+}
+
+TEST_CASE(ssh_host_record_round_trips_and_rejects_corruption) {
+    SshHosts hosts;
+    CHECK(hosts.upsert("Pi", "pi.test", "deck", 22));
+    CHECK(hosts.upsert("Lab", "lab.test", "root", 2200));
+    SshHostRecord record = encodeSshHosts(hosts);
+
+    SshHosts decoded;
+    CHECK(decodeSshHosts(record, decoded));
+    CHECK_EQ(decoded.size(), 2u);
+    CHECK_STR_EQ(decoded.at(0).label.data(), "Lab");
+    CHECK_STR_EQ(decoded.at(1).hostname.data(), "pi.test");
+
+    record.checksum ^= 0x01u;
+    CHECK(!decodeSshHosts(record, decoded));
+}
+
+TEST_CASE(ssh_runtime_budget_fits_observed_cardputer_heap) {
+    constexpr std::size_t observedFreeHeap = 64072;
+    constexpr std::size_t observedLargestBlock = 49140;
+    constexpr std::size_t rtosObjectOverheadAllowance = 2048;
+    constexpr std::size_t minimumSessionHeapReserve = 32 * 1024;
+    constexpr std::size_t observedPeakStackUse = 14 * 1024;
+    constexpr std::size_t minimumStackHeadroom = 6 * 1024;
+    constexpr std::size_t startupAllocation =
+        ssh_memory::kTaskStackBytes + ssh_memory::kTransmitCapacity +
+        ssh_memory::kReceiveCapacity + rtosObjectOverheadAllowance;
+
+    CHECK(ssh_memory::kTaskStackBytes <= observedLargestBlock);
+    CHECK(ssh_memory::kTaskStackBytes >= observedPeakStackUse + minimumStackHeadroom);
+    CHECK(startupAllocation + minimumSessionHeapReserve <= observedFreeHeap);
+}
+
+TEST_CASE(terminal_buffer_writes_text_and_tracks_crlf_cursor) {
+    TerminalBuffer terminal;
+    terminal.write("hello\r\nworld");
+    CHECK_EQ(terminal.cell(0, 0).character, 'h');
+    CHECK_EQ(terminal.cell(0, 4).character, 'o');
+    CHECK_EQ(terminal.cell(1, 0).character, 'w');
+    CHECK_EQ(terminal.cell(1, 4).character, 'd');
+    CHECK_EQ(terminal.cursorRow(), 1u);
+    CHECK_EQ(terminal.cursorColumn(), 5u);
+}
+
+TEST_CASE(terminal_buffer_scrolls_and_exposes_local_history) {
+    TerminalBuffer terminal;
+    for (int line = 0; line < 15; ++line) {
+        char text[8];
+        std::snprintf(text, sizeof(text), line == 14 ? "%02d" : "%02d\r\n", line);
+        terminal.write(text);
+    }
+    CHECK_EQ(terminal.scrollbackLines(), 2u);
+    CHECK_EQ(terminal.cell(0, 0).character, '0');
+    CHECK_EQ(terminal.cell(0, 1).character, '2');
+    CHECK_EQ(terminal.cell(kTerminalRows - 1, 1).character, '4');
+
+    CHECK(terminal.scrollUp(2));
+    CHECK_EQ(terminal.scrollOffset(), 2u);
+    CHECK_EQ(terminal.cell(0, 1).character, '0');
+    CHECK(terminal.scrollDown(1));
+    CHECK_EQ(terminal.cell(0, 1).character, '1');
+}
+
+TEST_CASE(terminal_buffer_handles_ansi_cursor_motion_and_line_erase) {
+    TerminalBuffer terminal;
+    terminal.write("abcdef\x1b[3DXY");
+    CHECK_EQ(terminal.cell(0, 2).character, 'c');
+    CHECK_EQ(terminal.cell(0, 3).character, 'X');
+    CHECK_EQ(terminal.cell(0, 4).character, 'Y');
+    CHECK_EQ(terminal.cell(0, 5).character, 'f');
+
+    terminal.write("\x1b[2K");
+    for (std::size_t column = 0; column < kTerminalColumns; ++column) {
+        CHECK_EQ(terminal.cell(0, column).character, ' ');
+    }
+}
+
+TEST_CASE(terminal_buffer_handles_ansi_clear_and_absolute_position) {
+    TerminalBuffer terminal;
+    terminal.write("junk\r\nmore");
+    terminal.write("\x1b[2J\x1b[2;3Hok");
+    CHECK_EQ(terminal.cell(0, 0).character, ' ');
+    CHECK_EQ(terminal.cell(1, 0).character, ' ');
+    CHECK_EQ(terminal.cell(1, 2).character, 'o');
+    CHECK_EQ(terminal.cell(1, 3).character, 'k');
+    CHECK_EQ(terminal.cursorRow(), 1u);
+    CHECK_EQ(terminal.cursorColumn(), 4u);
+}
+
+TEST_CASE(terminal_buffer_preserves_basic_ansi_colors_per_cell) {
+    TerminalBuffer terminal;
+    terminal.write("\x1b[31;44mR\x1b[0mN");
+    CHECK_EQ(terminal.cell(0, 0).foreground(), 1u);
+    CHECK_EQ(terminal.cell(0, 0).background(), 4u);
+    CHECK_EQ(terminal.cell(0, 1).foreground(), 7u);
+    CHECK_EQ(terminal.cell(0, 1).background(), 0u);
+}
+
+TEST_CASE(terminal_buffer_handles_relative_cursor_motion_across_writes) {
+    TerminalBuffer terminal;
+    terminal.write("\x1b[3;5H");
+    terminal.write("X\x1b[");
+    terminal.write("2A\x1b[3CY");
+    CHECK_EQ(terminal.cell(2, 4).character, 'X');
+    CHECK_EQ(terminal.cell(0, 8).character, 'Y');
+    CHECK_EQ(terminal.cursorRow(), 0u);
+    CHECK_EQ(terminal.cursorColumn(), 9u);
+}
+
+TEST_CASE(terminal_buffer_handles_backspace_and_tab_stops) {
+    TerminalBuffer terminal;
+    terminal.write("abc\bZ\tQ");
+    CHECK_EQ(terminal.cell(0, 0).character, 'a');
+    CHECK_EQ(terminal.cell(0, 1).character, 'b');
+    CHECK_EQ(terminal.cell(0, 2).character, 'Z');
+    CHECK_EQ(terminal.cell(0, 8).character, 'Q');
+    CHECK_EQ(terminal.cursorColumn(), 9u);
+}
+
+TEST_CASE(terminal_buffer_ignores_shell_title_and_charset_sequences) {
+    TerminalBuffer terminal;
+    terminal.write("\x1b]0;private-title\x07prompt");
+    terminal.write("\x1b(B ok");
+    CHECK_EQ(terminal.cell(0, 0).character, 'p');
+    CHECK_EQ(terminal.cell(0, 5).character, 't');
+    CHECK_EQ(terminal.cell(0, 6).character, ' ');
+    CHECK_EQ(terminal.cell(0, 7).character, 'o');
+    CHECK_EQ(terminal.cell(0, 8).character, 'k');
+    CHECK_EQ(terminal.cursorColumn(), 9u);
+}
+
+TEST_CASE(ssh_app_host_list_navigates_and_emits_explicit_actions) {
+    SshAppModel model;
+    CHECK_EQ(model.page(), SshPage::HostList);
+    CHECK_EQ(model.inputMode(), InputMode::Text);
+    model.handle({InputAction::Down, '\0'}, 3);
+    CHECK_EQ(model.selectedHost(), 1u);
+    auto result = model.handle({InputAction::None, 'e'}, 3);
+    CHECK_EQ(result.effect, SshEffect::EditSelected);
+    CHECK_EQ(result.index, 1u);
+    result = model.handle({InputAction::None, 'd'}, 3);
+    CHECK_EQ(model.page(), SshPage::ConfirmDelete);
+    CHECK_EQ(result.effect, SshEffect::None);
+    result = model.handle({InputAction::Back, '\0'}, 3);
+    CHECK_EQ(model.page(), SshPage::HostList);
+
+    result = model.handle({InputAction::Confirm, '\0'}, 3);
+    CHECK_EQ(result.effect, SshEffect::ConnectSelected);
+    CHECK_EQ(result.index, 1u);
+    result = model.handle({InputAction::Erase, '\0'}, 3);
+    CHECK_EQ(result.effect, SshEffect::GoHome);
+}
+
+TEST_CASE(ssh_app_editor_builds_a_valid_host_without_heap_input) {
+    SshAppModel model;
+    model.handle({InputAction::None, 'n'}, 0);
+    CHECK_EQ(model.page(), SshPage::Editor);
+    CHECK_STR_EQ(model.editorValue(3), "22");
+
+    for (const char character : std::array<char, 2>{'P', 'i'}) {
+        model.handle({InputAction::None, character}, 0);
+    }
+    model.handle({InputAction::Tab, '\0'}, 0);
+    for (const char character : std::array<char, 7>{'p', 'i', '.', 't', 'e', 's', 't'}) {
+        model.handle({InputAction::None, character}, 0);
+    }
+    model.handle({InputAction::Tab, '\0'}, 0);
+    for (const char character : std::array<char, 4>{'d', 'e', 'c', 'k'}) {
+        model.handle({InputAction::None, character}, 0);
+    }
+    model.handle({InputAction::Tab, '\0'}, 0);
+    const auto result = model.handle({InputAction::Confirm, '\0'}, 0);
+    CHECK_EQ(result.effect, SshEffect::SaveEditor);
+
+    SshHost host;
+    CHECK(model.editedHost(host));
+    CHECK_STR_EQ(host.label.data(), "Pi");
+    CHECK_STR_EQ(host.hostname.data(), "pi.test");
+    CHECK_STR_EQ(host.username.data(), "deck");
+    CHECK_EQ(host.port, 22u);
+}
+
+TEST_CASE(ssh_app_editor_can_load_and_update_an_existing_host) {
+    SshHosts hosts;
+    CHECK(hosts.upsert("Lab", "lab.test", "root", 22));
+    SshAppModel model;
+    model.beginEdit(hosts.at(0), 0);
+    CHECK_EQ(model.page(), SshPage::Editor);
+    CHECK_EQ(model.editingIndex(), 0u);
+    CHECK_STR_EQ(model.editorValue(0), "Lab");
+    CHECK_STR_EQ(model.editorValue(1), "lab.test");
+    CHECK_STR_EQ(model.editorValue(2), "root");
+    CHECK_STR_EQ(model.editorValue(3), "22");
+
+    model.handle({InputAction::Back, '\0'}, 1);
+    CHECK_EQ(model.page(), SshPage::HostList);
+}
+
+TEST_CASE(ssh_app_editor_stays_open_and_marks_invalid_records) {
+    SshAppModel model;
+    model.handle({InputAction::None, 'n'}, 0);
+    model.handle({InputAction::Tab, '\0'}, 0);
+    model.handle({InputAction::Tab, '\0'}, 0);
+    model.handle({InputAction::Tab, '\0'}, 0);
+    const auto result = model.handle({InputAction::Confirm, '\0'}, 0);
+    CHECK_EQ(result.effect, SshEffect::None);
+    CHECK_EQ(model.page(), SshPage::Editor);
+    CHECK(model.editorHasError());
+}
+
+TEST_CASE(ssh_app_session_pages_support_cancel_reconnect_and_quick_commands) {
+    SshAppModel model;
+    model.showConnecting();
+    CHECK_EQ(model.page(), SshPage::Connecting);
+    auto result = model.handle({InputAction::Back, '\0'}, 1);
+    CHECK_EQ(result.effect, SshEffect::CancelConnection);
+    CHECK_EQ(model.page(), SshPage::HostList);
+
+    model.showTerminal();
+    CHECK_EQ(model.inputMode(), InputMode::Terminal);
+    model.handle({InputAction::QuickCommands, '\0'}, 1);
+    CHECK_EQ(model.page(), SshPage::QuickCommands);
+    CHECK_EQ(model.inputMode(), InputMode::System);
+    model.handle({InputAction::Down, '\0'}, 1);
+    CHECK_STR_EQ(model.quickCommand(), "df -h");
+    result = model.handle({InputAction::Confirm, '\0'}, 1);
+    CHECK_EQ(result.effect, SshEffect::SendQuickCommand);
+    CHECK_EQ(model.page(), SshPage::Terminal);
+
+    model.showDisconnected();
+    result = model.handle({InputAction::Confirm, '\0'}, 1);
+    CHECK_EQ(result.effect, SshEffect::Reconnect);
+}
+
+TEST_CASE(ssh_app_requires_confirmation_before_deleting_a_host) {
+    SshAppModel model;
+    model.handle({InputAction::Down, '\0'}, 2);
+    model.handle({InputAction::None, 'd'}, 2);
+    CHECK_EQ(model.page(), SshPage::ConfirmDelete);
+    auto result = model.handle({InputAction::Back, '\0'}, 2);
+    CHECK_EQ(result.effect, SshEffect::None);
+    CHECK_EQ(model.page(), SshPage::HostList);
+
+    model.handle({InputAction::None, 'd'}, 2);
+    result = model.handle({InputAction::Confirm, '\0'}, 2);
+    CHECK_EQ(result.effect, SshEffect::DeleteSelected);
+    CHECK_EQ(result.index, 1u);
+    CHECK_EQ(model.page(), SshPage::HostList);
+    CHECK_EQ(model.selectedHost(), 0u);
 }
 
 TEST_CASE(local_clock_rejects_unsynced_time_and_applies_utc_offset) {
@@ -640,11 +1114,14 @@ TEST_CASE(settings_wifi_scan_selection_and_forget_are_explicit) {
     CHECK_EQ(model.page(), SettingsPage::Wifi);
 
     model.handle(InputAction::Down);
-    model.handle(InputAction::Down);
-    result = model.handle(InputAction::Confirm);
+    result = model.handle(InputAction::Confirm, 0, 2);
+    CHECK_EQ(model.page(), SettingsPage::WifiSavedNetworks);
+    result = model.handle(InputAction::Confirm, 0, 2);
+    CHECK_EQ(result.effect, SettingsEffect::SelectWifiForForget);
     CHECK_EQ(model.page(), SettingsPage::ConfirmForgetWifi);
-    result = model.handle(InputAction::Confirm);
+    result = model.handle(InputAction::Confirm, 0, 2);
     CHECK_EQ(result.effect, SettingsEffect::ForgetWifi);
+    CHECK_EQ(model.page(), SettingsPage::WifiSavedNetworks);
 }
 
 TEST_CASE(settings_system_actions_and_diagnostics_are_reachable) {
@@ -963,6 +1440,8 @@ TEST_CASE(lora_app_does_not_request_duplicate_send_while_transmitting) {
 }
 
 int main() {
+    ssh_error_detail_redacts_endpoint_identity();
+    ssh_error_detail_stays_single_line_and_never_partially_copies_secret();
     plain_a();
     mac_modifiers();
     fn_navigation_and_escape();
@@ -974,6 +1453,13 @@ int main() {
     system_confirm_back_and_tab_are_local();
     text_keymap_covers_wifi_password_characters();
     text_mode_is_local_and_uses_explicit_edit_actions();
+    text_mode_uses_fn_navigation_to_move_between_fields();
+    text_mode_exposes_tab_for_multi_field_editors();
+    terminal_mode_emits_local_printable_characters();
+    terminal_mode_converts_ctrl_letters_to_control_bytes();
+    terminal_mode_exposes_navigation_and_terminal_controls();
+    terminal_mode_reserves_option_navigation_for_local_scrollback();
+    terminal_input_encodes_shell_control_sequences();
     keyboard_input_is_dropped_when_disconnected();
     keyboard_input_becomes_hid_when_connected();
     enter_used_to_open_keyboard_does_not_leak_to_mac();
@@ -986,6 +1472,27 @@ int main() {
     launcher_starts_on_keyboard_and_wraps();
     launcher_confirm_requests_selected_app();
     wifi_and_weather_labels_cover_visible_states();
+    wifi_profiles_keep_eight_recent_networks_without_exposing_passwords();
+    wifi_profiles_reject_empty_or_unterminated_credentials();
+    ssh_hosts_keep_six_recent_endpoints();
+    ssh_hosts_reject_blank_or_unterminated_fields();
+    ssh_hosts_support_edit_delete_and_recent_order();
+    ssh_host_record_round_trips_and_rejects_corruption();
+    ssh_runtime_budget_fits_observed_cardputer_heap();
+    terminal_buffer_writes_text_and_tracks_crlf_cursor();
+    terminal_buffer_scrolls_and_exposes_local_history();
+    terminal_buffer_handles_ansi_cursor_motion_and_line_erase();
+    terminal_buffer_handles_ansi_clear_and_absolute_position();
+    terminal_buffer_preserves_basic_ansi_colors_per_cell();
+    terminal_buffer_handles_relative_cursor_motion_across_writes();
+    terminal_buffer_handles_backspace_and_tab_stops();
+    terminal_buffer_ignores_shell_title_and_charset_sequences();
+    ssh_app_host_list_navigates_and_emits_explicit_actions();
+    ssh_app_editor_builds_a_valid_host_without_heap_input();
+    ssh_app_editor_can_load_and_update_an_existing_host();
+    ssh_app_editor_stays_open_and_marks_invalid_records();
+    ssh_app_session_pages_support_cancel_reconnect_and_quick_commands();
+    ssh_app_requires_confirmation_before_deleting_a_host();
     local_clock_rejects_unsynced_time_and_applies_utc_offset();
     weather_display_keeps_successful_data_when_inputs_disappear();
     gps_state_distinguishes_stream_search_fix_and_stale();

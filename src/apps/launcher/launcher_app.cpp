@@ -17,6 +17,7 @@ namespace {
 const char* appTitle(AppId id) {
     switch (id) {
         case AppId::Keyboard: return "KEYBOARD";
+        case AppId::Ssh: return "SSH TERMINAL";
         case AppId::Gps: return "GPS";
         case AppId::LoRa: return "LORA";
         case AppId::Weather: return "WEATHER";
@@ -28,6 +29,7 @@ const char* appTitle(AppId id) {
 const char* appIcon(AppId id) {
     switch (id) {
         case AppId::Keyboard: return ">_";
+        case AppId::Ssh: return "$_";
         case AppId::Gps: return "G+";
         case AppId::LoRa: return "LR";
         case AppId::Weather: return "WX";
@@ -72,6 +74,9 @@ void LauncherApp::render(Display& display, const SystemContext& context) {
     if (model_.selected() == AppId::Keyboard) {
         std::snprintf(subtitle, sizeof(subtitle), "%s",
                       context.bleConnected ? "Mac connected" : "Ready to pair");
+    } else if (model_.selected() == AppId::Ssh) {
+        std::snprintf(subtitle, sizeof(subtitle), "%s",
+                      context.wifiConnected ? "Remote shell ready" : "Wi-Fi required");
     } else if (model_.selected() == AppId::Gps) {
         const GpsSnapshot gps = context.gps != nullptr ? context.gps->snapshot() : GpsSnapshot{};
         if (classifyGpsState(gps) == GpsState::Fix && gps.satellitesValid) {
