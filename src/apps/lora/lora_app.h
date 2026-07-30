@@ -1,5 +1,6 @@
 #pragma once
 
+#include "apps/lora/lora_app_model.h"
 #include "core/app.h"
 
 namespace pd {
@@ -16,7 +17,7 @@ public:
     void render(Display& display, const SystemContext& context) override;
 
 private:
-    bool busyFeedback_ = false;
+    LoRaAppModel model_;
 };
 
 }  // namespace pd

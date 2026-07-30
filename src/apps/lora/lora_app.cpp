@@ -68,46 +68,44 @@ void drawHint(M5Canvas& canvas) {
 }  // namespace
 
 void LoRaApp::onEnter(SystemContext& context) {
-    busyFeedback_ = false;
-    if (context.lora != nullptr) context.lora->ensureStarted(context.diagnostics);
+    if (model_.enter() == LoRaAppEffect::EnsureStarted && context.lora != nullptr) {
+        context.lora->ensureStarted(context.diagnostics);
+    }
 }
 
 void LoRaApp::onExit(SystemContext& context) {
-    busyFeedback_ = false;
-    if (context.lora != nullptr) context.lora->clearDraft();
+    if (model_.exit() == LoRaAppEffect::ClearDraft && context.lora != nullptr) {
+        context.lora->clearDraft();
+    }
 }
 
 void LoRaApp::onInput(const InputEvent& event, SystemContext& context) {
-    if (event.action == InputAction::Back) {
-        context.requestApp(AppId::Launcher);
-        return;
-    }
-    if (context.lora == nullptr) return;
-
-    if (event.character >= 0x20 && event.character <= 0x7e) {
-        context.lora->appendDraft(event.character);
-        busyFeedback_ = false;
-    } else if (event.action == InputAction::Erase) {
-        context.lora->eraseDraft();
-        busyFeedback_ = false;
-    } else if (event.action == InputAction::Confirm) {
-        const LoRaData& data = context.lora->data();
-        if (data.draftEmpty()) return;
-        if (data.state() == LoRaRadioState::Listening) {
-            busyFeedback_ = !context.lora->requestTransmit();
-        } else if (data.state() == LoRaRadioState::Initializing ||
-                   data.state() == LoRaRadioState::Transmitting) {
-            busyFeedback_ = true;
-        }
-    }
-}
-
-void LoRaApp::update(uint32_t, SystemContext& context) {
-    if (busyFeedback_ && context.lora != nullptr &&
-        context.lora->data().state() == LoRaRadioState::Listening) {
-        busyFeedback_ = false;
+    const LoRaData* data = context.lora != nullptr ? &context.lora->data() : nullptr;
+    const LoRaAppResult result = model_.handle(
+        event, data != nullptr ? data->state() : LoRaRadioState::Unavailable,
+        data == nullptr || data->draftEmpty(), context.uptimeMs);
+    switch (result.effect) {
+        case LoRaAppEffect::None:
+        case LoRaAppEffect::EnsureStarted:
+        case LoRaAppEffect::ClearDraft: return;
+        case LoRaAppEffect::AppendDraft:
+            if (context.lora != nullptr) context.lora->appendDraft(result.character);
+            return;
+        case LoRaAppEffect::EraseDraft:
+            if (context.lora != nullptr) context.lora->eraseDraft();
+            return;
+        case LoRaAppEffect::RequestTransmit:
+            if (context.lora != nullptr && !context.lora->requestTransmit()) {
+                model_.rejectSend(context.uptimeMs);
+            }
+            return;
+        case LoRaAppEffect::GoHome:
+            context.requestApp(AppId::Launcher);
+            return;
     }
 }
+
+void LoRaApp::update(uint32_t, SystemContext&) {}
 
 void LoRaApp::render(Display& display, const SystemContext& context) {
     drawStatusBar(display, makeStatusBarData("LORA", context));
@@ -148,10 +146,11 @@ void LoRaApp::render(Display& display, const SystemContext& context) {
                           kHistoryY + static_cast<int16_t>(firstSlot + index) * kHistoryStep);
     }
 
-    canvas.setTextColor(busyFeedback_ ? theme::kWarning : theme::kMuted,
+    const bool sendRejected = model_.sendRejectedVisible(context.uptimeMs);
+    canvas.setTextColor(sendRejected ? theme::kWarning : theme::kMuted,
                         theme::kBackground);
     char quality[40]{};
-    if (busyFeedback_) {
+    if (sendRejected) {
         std::snprintf(quality, sizeof(quality), "SEND REJECTED: BUSY");
     } else if (data.hasReceiveQuality()) {
         std::snprintf(quality, sizeof(quality), "RSSI %.1f dBm  SNR %.1f dB",

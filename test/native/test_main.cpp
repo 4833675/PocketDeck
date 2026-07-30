@@ -6,6 +6,7 @@
 
 #include "apps/gps/gps_app_model.h"
 #include "apps/launcher/launcher_model.h"
+#include "apps/lora/lora_app_model.h"
 #include "apps/settings/settings_model.h"
 #include "core/ble_keyboard_policy.h"
 #include "core/clock_data.h"
@@ -837,6 +838,74 @@ TEST_CASE(lora_state_transitions_cover_crc_restart_and_persistent_error) {
     CHECK_STR_EQ(loraRadioStateLabel(LoRaRadioState::Error), "ERROR");
 }
 
+TEST_CASE(lora_app_lifecycle_emits_only_lazy_start_and_draft_clear) {
+    LoRaAppModel model;
+    CHECK_EQ(model.enter(), LoRaAppEffect::EnsureStarted);
+    CHECK_EQ(model.exit(), LoRaAppEffect::ClearDraft);
+}
+
+TEST_CASE(lora_app_maps_text_edit_send_and_home_actions) {
+    LoRaAppModel model;
+    auto result = model.handle({InputAction::None, 'A'}, LoRaRadioState::Unavailable,
+                               true, 10);
+    CHECK_EQ(result.effect, LoRaAppEffect::AppendDraft);
+    CHECK_EQ(result.character, 'A');
+
+    result = model.handle({InputAction::Erase, '\0'}, LoRaRadioState::Listening,
+                          false, 11);
+    CHECK_EQ(result.effect, LoRaAppEffect::EraseDraft);
+    result = model.handle({InputAction::Back, '\0'}, LoRaRadioState::Listening,
+                          false, 12);
+    CHECK_EQ(result.effect, LoRaAppEffect::GoHome);
+
+    result = model.handle({InputAction::Confirm, '\0'}, LoRaRadioState::Listening,
+                          true, 13);
+    CHECK_EQ(result.effect, LoRaAppEffect::None);
+    result = model.handle({InputAction::Confirm, '\0'}, LoRaRadioState::Unavailable,
+                          false, 14);
+    CHECK_EQ(result.effect, LoRaAppEffect::None);
+    result = model.handle({InputAction::Confirm, '\0'}, LoRaRadioState::Initializing,
+                          false, 14);
+    CHECK_EQ(result.effect, LoRaAppEffect::None);
+    result = model.handle({InputAction::Confirm, '\0'}, LoRaRadioState::Error,
+                          false, 14);
+    CHECK_EQ(result.effect, LoRaAppEffect::None);
+    result = model.handle({InputAction::Confirm, '\0'}, LoRaRadioState::Listening,
+                          false, 15);
+    CHECK_EQ(result.effect, LoRaAppEffect::RequestTransmit);
+}
+
+TEST_CASE(lora_app_rejected_send_feedback_is_bounded_visible_and_wrap_safe) {
+    LoRaAppModel model;
+    model.rejectSend(100);
+    CHECK(model.sendRejectedVisible(100));
+    CHECK(model.sendRejectedVisible(133));
+    CHECK(model.sendRejectedVisible(1099));
+    CHECK(!model.sendRejectedVisible(1100));
+
+    model.rejectSend(UINT32_MAX - 20u);
+    CHECK(model.sendRejectedVisible(12));
+    CHECK(!model.sendRejectedVisible(979));
+
+    model.rejectSend(2000);
+    model.handle({InputAction::None, 'x'}, LoRaRadioState::Listening, false, 2001);
+    CHECK(!model.sendRejectedVisible(2001));
+    model.rejectSend(3000);
+    model.handle({InputAction::Erase, '\0'}, LoRaRadioState::Listening, false, 3001);
+    CHECK(!model.sendRejectedVisible(3001));
+}
+
+TEST_CASE(lora_app_does_not_request_duplicate_send_while_transmitting) {
+    LoRaAppModel model;
+    auto result = model.handle({InputAction::Confirm, '\0'}, LoRaRadioState::Listening,
+                               false, 50);
+    CHECK_EQ(result.effect, LoRaAppEffect::RequestTransmit);
+    result = model.handle({InputAction::Confirm, '\0'}, LoRaRadioState::Transmitting,
+                          false, 51);
+    CHECK_EQ(result.effect, LoRaAppEffect::None);
+    CHECK(model.sendRejectedVisible(84));
+}
+
 int main() {
     plain_a();
     mac_modifiers();
@@ -891,5 +960,9 @@ int main() {
     lora_history_evicts_oldest_and_has_readable_direction_labels();
     lora_rx_sanitizes_payload_rejects_oversize_and_tracks_quality();
     lora_state_transitions_cover_crc_restart_and_persistent_error();
+    lora_app_lifecycle_emits_only_lazy_start_and_draft_clear();
+    lora_app_maps_text_edit_send_and_home_actions();
+    lora_app_rejected_send_feedback_is_bounded_visible_and_wrap_safe();
+    lora_app_does_not_request_duplicate_send_while_transmitting();
     return pd_test::finish();
 }
