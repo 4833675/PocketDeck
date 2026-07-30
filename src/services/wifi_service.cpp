@@ -51,58 +51,100 @@ bool WifiService::begin(bool enabled) {
     // one of our known-good profiles.
     WiFi.persistent(false);
     WiFi.setAutoReconnect(false);
+    initialized_ = true;
+    runtimeStateApplied_ = false;
     setEnabled(enabled);
     return true;
 }
 
 void WifiService::setEnabled(bool enabled) {
     snapshot_.enabled = enabled;
+    if (initialized_) applyRuntimeState(millis());
+}
+
+void WifiService::setActive(bool active) {
+    active_ = active;
+    if (initialized_) applyRuntimeState(millis());
+}
+
+void WifiService::applyRuntimeState(uint32_t nowMs) {
+    const bool shouldRun = snapshot_.enabled && active_;
+    if (runtimeStateApplied_ && runtimeRunning_ == shouldRun) return;
+
+    runtimeStateApplied_ = true;
+    runtimeRunning_ = shouldRun;
+    if (shouldRun) {
+        startRuntime(nowMs);
+    } else {
+        stopRuntime(nowMs);
+    }
+}
+
+void WifiService::stopRuntime(uint32_t nowMs) {
     snapshot_.networkCount = 0;
     scanStartPending_ = false;
     scanActive_ = false;
     scanPurpose_ = ScanPurpose::None;
     connectionActive_ = false;
+    candidateConnection_ = false;
     candidateCount_ = 0;
     candidatePosition_ = 0;
+    nextAutoScanAtMs_ = 0;
     snapshot_.autoCandidateCount = 0;
     clearPendingCredentials();
 
-    if (!enabled) {
-        esp_wifi_scan_stop();
-        WiFi.scanDelete();
-        WiFi.disconnect(true, false);
-        clearLinkDetails();
-        snapshot_.ntpSynced = false;
-        snapshot_.utcEpoch = 0;
-        timeRequested_ = false;
-        wasConnected_ = false;
-        syncSavedNetworks();
-        setState(WifiState::Disabled, millis());
-        return;
-    }
+    esp_wifi_scan_stop();
+    WiFi.scanDelete();
+    WiFi.disconnect(true, false);
+    WiFi.mode(WIFI_OFF);
+    clearLinkDetails();
+    snapshot_.ntpSynced = false;
+    snapshot_.utcEpoch = 0;
+    timeRequested_ = false;
+    wasConnected_ = false;
+    connectedAtMs_ = 0;
+    syncSavedNetworks();
+    setState(WifiState::Disabled, nowMs);
+}
+
+void WifiService::startRuntime(uint32_t nowMs) {
+    snapshot_.networkCount = 0;
+    scanStartPending_ = false;
+    scanActive_ = false;
+    scanPurpose_ = ScanPurpose::None;
+    connectionActive_ = false;
+    candidateConnection_ = false;
+    candidateCount_ = 0;
+    candidatePosition_ = 0;
+    nextAutoScanAtMs_ = 0;
+    snapshot_.autoCandidateCount = 0;
+    clearPendingCredentials();
 
     WiFi.mode(WIFI_STA);
     WiFi.setAutoReconnect(false);
-    importLegacyProfile();
+    if (!legacyImportAttempted_) {
+        legacyImportAttempted_ = true;
+        importLegacyProfile();
+    }
     syncSavedNetworks();
     WiFi.disconnect(false, false);
     clearLinkDetails();
     wasConnected_ = false;
     if (profiles_.empty()) {
-        setState(WifiState::Idle, millis());
+        setState(WifiState::Idle, nowMs);
     } else {
-        requestScan(ScanPurpose::AutoConnect, millis());
+        requestScan(ScanPurpose::AutoConnect, nowMs);
     }
 }
 
 bool WifiService::startScan() {
-    if (!snapshot_.enabled) return false;
+    if (!runtimeRunning_) return false;
     requestScan(ScanPurpose::User, millis());
     return true;
 }
 
 bool WifiService::connect(const char* ssid, const char* password) {
-    if (!snapshot_.enabled || ssid == nullptr || ssid[0] == '\0') return false;
+    if (!runtimeRunning_ || ssid == nullptr || ssid[0] == '\0') return false;
 
     const WifiProfile* saved = profiles_.find(ssid);
     const bool useSavedPassword = saved != nullptr &&
@@ -131,23 +173,28 @@ bool WifiService::forgetNetwork(const char* ssid) {
 
     if (removeActive || profiles_.empty()) {
         connectionActive_ = false;
+        candidateConnection_ = false;
+        candidateCount_ = 0;
+        candidatePosition_ = 0;
+        nextAutoScanAtMs_ = 0;
         clearPendingCredentials();
-        WiFi.disconnect(false, false);
+        if (runtimeRunning_) WiFi.disconnect(false, false);
         if (profiles_.empty()) clearLegacyStationConfig();
         wasConnected_ = false;
+        connectedAtMs_ = 0;
         clearLinkDetails();
-        if (profiles_.empty()) {
-            setState(WifiState::Idle, millis());
+        if (!runtimeRunning_) {
+            setState(WifiState::Disabled, millis());
         } else {
-            scheduleAutoScan(millis(), 300);
             setState(WifiState::Idle, millis());
+            if (!profiles_.empty()) scheduleAutoScan(millis(), 300);
         }
     }
     return stored;
 }
 
 void WifiService::update(uint32_t nowMs) {
-    if (!snapshot_.enabled) return;
+    if (!runtimeRunning_) return;
 
     snapshot_.lastStatus = static_cast<int16_t>(WiFi.status());
     if (snapshot_.state == WifiState::Scanning || scanStartPending_ || scanActive_) {
@@ -249,6 +296,7 @@ void WifiService::syncSavedNetworks() {
 }
 
 void WifiService::requestScan(ScanPurpose purpose, uint32_t nowMs) {
+    if (!runtimeRunning_) return;
     esp_wifi_scan_stop();
     WiFi.scanDelete();
     scanPurpose_ = purpose;
@@ -434,6 +482,7 @@ void WifiService::buildCandidates(int16_t count) {
 }
 
 bool WifiService::beginNextCandidate(uint32_t nowMs) {
+    if (!runtimeRunning_) return false;
     while (candidatePosition_ < candidateCount_) {
         const uint8_t index = candidates_[candidatePosition_++];
         if (index >= profiles_.size()) continue;
@@ -449,7 +498,9 @@ bool WifiService::beginNextCandidate(uint32_t nowMs) {
 bool WifiService::beginConnection(const char* ssid, const char* password,
                                   bool saveOnSuccess, bool candidateConnection,
                                   uint32_t nowMs) {
-    if (ssid == nullptr || ssid[0] == '\0' || password == nullptr) return false;
+    if (!runtimeRunning_ || ssid == nullptr || ssid[0] == '\0' || password == nullptr) {
+        return false;
+    }
 
     esp_wifi_scan_stop();
     WiFi.scanDelete();
@@ -517,6 +568,10 @@ void WifiService::clearPendingCredentials() {
 }
 
 void WifiService::scheduleAutoScan(uint32_t nowMs, uint32_t delayMs) {
+    if (!runtimeRunning_) {
+        nextAutoScanAtMs_ = 0;
+        return;
+    }
     nextAutoScanAtMs_ = nowMs + delayMs;
 }
 

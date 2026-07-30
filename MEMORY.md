@@ -8,18 +8,16 @@ This is the current handoff for the Pocket Deck repository. Read it with
 ## Current state
 
 - Repository: `https://github.com/4833675/PocketDeck`, branch `main`.
-- Current integration is `v0.7.1`: multi-profile Wi-Fi, Pocket SSH Terminal,
-  four-page GPS, raw LoRa P2P, and a hierarchical Chinese-capable TF-card MP3
-  player are included with the shell, BLE keyboard, weather, and diagnostics.
+- Current integration is `v0.8.0`: foreground resource profiles now isolate
+  BLE, Wi-Fi, GPS, LoRa, and MEDIA logging in addition to the existing shell,
+  SSH, GPS, LoRa, hierarchical Chinese MP3 player, weather, and diagnostics.
 - The previous `v0.5.0` image was flashed without clearing NVS. Real-device validation
   reached `CONNECTING -> AUTHENTICATING -> OPENING SHELL -> CONNECTED` against a
   public-key-only server; host creation also survived repeated uploads/restarts.
   Terminal typing, controls, scrollback, and reconnect scenarios remain pending.
-- Integrated MEDIA/LoRa/GPS automated validation: `scripts/test-native.sh`
-  passed 920 checks; `pio run -e cardputer-adv` with ESP8266Audio 2.2.0 and
-  RadioLib 7.7.1 used 90,624 / 327,680 bytes RAM (27.7%) and 2,078,353 /
-  3,145,728 bytes flash (66.1%). Only the pre-existing
-  LibSSH-ESP32 compiler warnings remain.
+- Integrated automated validation: `scripts/test-native.sh` passed 943 checks;
+  `pio run -e cardputer-adv` used 90,840 / 327,680 bytes RAM (27.7%) and
+  2,083,045 / 3,145,728 bytes flash (66.2%).
 - No LoRa Cap, antenna, RF, or two-endpoint hardware claim has been made.
 - A MEDIA `tracks=0` incident was traced from TF evidence to stale v0.6 firmware,
   whose scanner was non-recursive. v0.7.0 and then v0.7.1 were uploaded without
@@ -33,7 +31,13 @@ This is the current handoff for the Pocket Deck repository. Read it with
 - Still awaiting user validation: the LoRa two-endpoint checklist, GPS 4/4
   moving/stationary/invalid/stale checks, remaining Pocket SSH rows, second-Wi-Fi
   save, restart/reconnect, strongest-known selection, fallback, and deletion.
-- There is no active code blocker.
+- v0.8.0 was uploaded without erasing NVS; USB `LOG STATUS` reported TF logging
+  ready/mounted. MEDIA playback is now smooth and BLE Keyboard works after
+  app-scoped suspend/resume, as confirmed on the real device.
+- Known unresolved issue: while remaining inside SSH, Weather, or Settings,
+  Wi-Fi may still cycle through disconnect/scan/reconnect. v0.8.0 prevents this
+  work outside Wi-Fi apps but does not fix the Wi-Fi state-machine root cause.
+- There is no build blocker.
 
 ## Product identity
 
@@ -120,7 +124,8 @@ Current apps and services:
   `0x34`, +22 dBm, 20-symbol preamble, 3.0 V TCXO, 140 mA. No custom header,
   encryption, addressing, ACK, retry, persistence, notification, or hidden TX
   queue exists. Do not log drafts, payloads, or message history.
-- LoRa initializes lazily on first app entry, then receives in the background.
+- LoRa initializes lazily on first app entry, listens only while its app is
+  foreground, and enters warm sleep with its DIO1 IRQ detached on exit.
   Missing Cap/error must not block GPS, TF, BLE, Wi-Fi, weather, or SSH. RX/TX
   payloads are bounded to 120 printable-ASCII bytes; RX is sanitized and
   oversize input drops. Keep six in-RAM records only.
@@ -130,8 +135,9 @@ Current apps and services:
   use built-in `efontCN_14`; never log filenames or audio content.
 - MEDIA uses M5's 1,536-sample speaker buffers and renders at 10 Hz to reduce
   underruns. Recommend 128 kbps / 44.1 kHz; hardware confirmation is pending.
-- TF logging closes each event so unexpected power loss does not strand a long
-  buffered session. `system.log` rotates at 4 MB through three archives; legacy
+- TF logging normally closes each event so unexpected power loss does not strand
+  a long buffered session. MEDIA uses a 12-event categorical deferred queue and
+  flushes after its MP3 file closes. `system.log` rotates at 4 MB through three archives; legacy
   `ble*.log` remains dump/clear compatible. Log state changes, never hot loops,
   key/terminal text, passwords, exact coordinates, filenames, or radio payloads.
 - The repository never contains the SSH private key. PlatformIO reads an
@@ -166,25 +172,27 @@ Serial log commands: `HELP`, `LOG STATUS`, `LOG DUMP`, `LOG DUMP ALL`, and
 
 ## Near-term validation
 
-1. Insert the prepared TF card, restart v0.7.1, then run the MEDIA and system-log
-   checklists; verify Chinese hierarchy navigation, 128 kbps continuity,
-   playback controls, `system.log`, memory, and regressions.
-2. Run `docs/validation/lora-text-terminal-smoke-test.md` with antenna attached
+1. Run `resource-isolation-smoke-test.md` on v0.8.0; prioritize MEDIA
+   continuity, no Wi-Fi/BT work during playback, deferred-log flush, and bond/profile survival.
+2. Stay inside SSH or Weather for several minutes, capture state-change logs,
+   and diagnose the remaining Wi-Fi disconnect/scan/reconnect cycle.
+3. Run `docs/validation/lora-text-terminal-smoke-test.md` with antenna attached
    and a matching second SX1262/RadioLib endpoint; all RF, shared-SPI, and
    regression rows remain pending until observed.
-3. Run the new GPS 4/4 moving, stationary, invalid, and stale-motion rows
+4. Run the new GPS 4/4 moving, stationary, invalid, and stale-motion rows
    outdoors without sharing precise coordinates.
-4. Continue `docs/validation/ssh-terminal-smoke-test.md` from terminal input,
+5. Continue `docs/validation/ssh-terminal-smoke-test.md` from terminal input,
    control keys, quick commands, scrollback, disconnect, and reconnect checks.
-5. Recheck BLE, Wi-Fi, weather, GPS, heap, and UI responsiveness after the SSH
+6. Recheck BLE, Wi-Fi, weather, GPS, heap, and UI responsiveness after the SSH
    worker has been created.
-6. Connect a second 2.4 GHz network and confirm both entries appear under Saved
+7. Connect a second 2.4 GHz network and confirm both entries appear under Saved
    networks and saved scan rows show `S`.
-7. Restart near each network separately and confirm automatic connection.
-8. Make both visible and confirm strongest-known selection; then make the first
+8. Restart near each network separately and confirm automatic connection.
+9. Make both visible and confirm strongest-known selection; then make the first
    candidate fail and confirm fallback.
-9. Delete one profile and verify the other survives restart.
-10. Recheck BLE typing and range-loss reconnect while Wi-Fi scans periodically.
+10. Delete one profile and verify the other survives restart.
+11. Recheck BLE typing/range-loss reconnect and confirm Wi-Fi scans occur only
+    inside SSH, Weather, or Settings.
 
 Use the matching files in `docs/validation/` to record results. After the device
 owner confirms behavior, update this section, commit locally, and push only if

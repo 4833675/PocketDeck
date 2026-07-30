@@ -13,6 +13,8 @@ class DiagnosticsService;
 
 class LoRaService {
 public:
+    void setActive(bool active);
+    bool active() const { return active_; }
     void ensureStarted(DiagnosticsService* diagnostics);
     void update(uint32_t nowMs);
     bool appendDraft(char character);
@@ -26,6 +28,8 @@ private:
     static void IRAM_ATTR onDio1();
 
     void startHardware();
+    bool suspendHardware();
+    bool resumeReceive();
     void beginRequestedTransmit(uint32_t nowMs);
     bool reconcileReceiveBeforeTransmit();
     void handleRadioIrq();
@@ -49,8 +53,12 @@ private:
     LoRaData data_{};
     LoRaTxPolicy txPolicy_{};
     DiagnosticsService* diagnostics_ = nullptr;
+    bool active_ = false;
     bool startRequested_ = false;
     bool startAttempted_ = false;
+    bool radioInitialized_ = false;
+    bool receiveReady_ = false;
+    bool dio1Attached_ = false;
     bool transmitRequested_ = false;
 };
 

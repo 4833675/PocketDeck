@@ -10,8 +10,9 @@
 namespace pd {
 namespace {
 
-uint16_t connectionColor(bool enabled, bool connected) {
+uint16_t connectionColor(bool enabled, bool active, bool connected) {
     if (!enabled) return theme::kError;
+    if (!active) return theme::kMuted;
     return connected ? theme::kPrimary : theme::kWarning;
 }
 
@@ -21,8 +22,10 @@ StatusBarData makeStatusBarData(const char* title, const SystemContext& context)
     StatusBarData data;
     data.title = title;
     data.bleEnabled = context.bleEnabled;
+    data.bleActive = context.bleActive;
     data.bleConnected = context.bleConnected;
     data.wifiEnabled = context.wifiEnabled;
+    data.wifiActive = context.wifiActive;
     data.wifiConnected = context.wifiConnected;
     data.clockValid = context.clockValid;
     data.clockHour = context.clockHour;
@@ -47,10 +50,14 @@ void drawStatusBar(Display& display, const StatusBarData& data) {
     canvas.drawString(battery, rightEdge, theme::kStatusHeight / 2);
 
     int16_t indicatorRight = rightEdge - canvas.textWidth(battery) - 7;
-    canvas.setTextColor(connectionColor(data.bleEnabled, data.bleConnected), theme::kPanel);
+    canvas.setTextColor(connectionColor(data.bleEnabled, data.bleActive,
+                                        data.bleConnected),
+                        theme::kPanel);
     canvas.drawString("BT", indicatorRight, theme::kStatusHeight / 2);
     indicatorRight -= canvas.textWidth("BT") + 7;
-    canvas.setTextColor(connectionColor(data.wifiEnabled, data.wifiConnected), theme::kPanel);
+    canvas.setTextColor(connectionColor(data.wifiEnabled, data.wifiActive,
+                                        data.wifiConnected),
+                        theme::kPanel);
     canvas.drawString("WiFi", indicatorRight, theme::kStatusHeight / 2);
 
     char clock[6] = "--:--";

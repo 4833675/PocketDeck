@@ -11,6 +11,8 @@ namespace pd {
 class GpsService {
 public:
     bool begin();
+    void setActive(bool active);
+    bool active() const { return active_; }
     void update();
     const GpsSnapshot& snapshot() const { return snapshot_; }
 
@@ -20,6 +22,7 @@ private:
     TinyGPSPlus parser_;
     GpsSnapshot snapshot_{};
     uint32_t lastByteMs_ = 0;
+    bool active_ = false;
 };
 
 }  // namespace pd

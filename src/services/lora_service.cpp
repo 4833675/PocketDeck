@@ -33,12 +33,33 @@ constexpr float kCurrentLimitMa = 140.0F;
 
 volatile bool LoRaService::dio1Fired_ = false;
 
+void LoRaService::setActive(bool active) {
+    if (active_ == active) return;
+    active_ = active;
+
+    if (!active_) {
+        transmitRequested_ = false;
+        txPolicy_.clear();
+        if (radioInitialized_) {
+            suspendHardware();
+        } else {
+            consumeDio1Flag();
+        }
+        return;
+    }
+
+    // setActive(true) deliberately does not perform first initialization.
+    // LoRaApp keeps that lazy boundary by calling ensureStarted().
+    if (receiveReady_) resumeReceive();
+}
+
 void LoRaService::ensureStarted(DiagnosticsService* diagnostics) {
     if (diagnostics != nullptr) diagnostics_ = diagnostics;
     startRequested_ = true;
 }
 
 void LoRaService::update(uint32_t nowMs) {
+    if (!active_) return;
     if (startRequested_ && !startAttempted_) startHardware();
     if (data_.state() == LoRaRadioState::Error ||
         data_.state() == LoRaRadioState::Unavailable) {
@@ -69,7 +90,9 @@ void LoRaService::clearDraft() {
 }
 
 bool LoRaService::requestTransmit() {
-    if (transmitRequested_ || txPolicy_.active() || !data_.canSend()) return false;
+    if (!active_ || transmitRequested_ || txPolicy_.active() || !data_.canSend()) {
+        return false;
+    }
     if (!txPolicy_.capture(reinterpret_cast<const uint8_t*>(data_.draft()),
                            data_.draftLength())) {
         return false;
@@ -105,6 +128,7 @@ void LoRaService::startHardware() {
         setPersistentError(status, "begin");
         return;
     }
+    radioInitialized_ = true;
 
     prepareSharedSpi();
     status = radio_.setCurrentLimit(kCurrentLimitMa);
@@ -112,9 +136,60 @@ void LoRaService::startHardware() {
         setPersistentError(status, "current-limit");
         return;
     }
+    receiveReady_ = true;
 
     attachDio1();
     if (startReceive()) logState("started", RADIOLIB_ERR_NONE);
+}
+
+bool LoRaService::suspendHardware() {
+    detachDio1();
+    consumeDio1Flag();
+
+    prepareSharedSpi();
+    int16_t status = radio_.standby();
+    if (status == RADIOLIB_ERR_NONE) {
+        prepareSharedSpi();
+        status = radio_.clearIrqFlags(RADIOLIB_SX126X_IRQ_ALL);
+    }
+    if (status == RADIOLIB_ERR_NONE) {
+        prepareSharedSpi();
+        status = radio_.sleep(true);
+    }
+    if (status != RADIOLIB_ERR_NONE) {
+        setPersistentError(status, "suspend");
+        data_.clearDraft();
+        return false;
+    }
+
+    // Standby aborts an in-flight operation. Keep LoRaData coherent without
+    // recording an aborted transmit, then discard the app-local draft.
+    if (data_.state() == LoRaRadioState::Transmitting ||
+        data_.state() == LoRaRadioState::Initializing) {
+        data_.beginListening();
+    }
+    data_.clearDraft();
+    logState("suspended", status);
+    return true;
+}
+
+bool LoRaService::resumeReceive() {
+    prepareSharedSpi();
+    int16_t status = radio_.standby();
+    if (status == RADIOLIB_ERR_NONE) {
+        prepareSharedSpi();
+        status = radio_.clearIrqFlags(RADIOLIB_SX126X_IRQ_ALL);
+    }
+    if (status != RADIOLIB_ERR_NONE) {
+        setPersistentError(status, "resume");
+        return false;
+    }
+
+    consumeDio1Flag();
+    attachDio1();
+    if (!startReceive()) return false;
+    logState("resumed", RADIOLIB_ERR_NONE);
+    return true;
 }
 
 void LoRaService::beginRequestedTransmit(uint32_t nowMs) {
@@ -285,6 +360,7 @@ bool LoRaService::finishReceive(bool rearm) {
 }
 
 bool LoRaService::startReceive() {
+    if (!active_ || !receiveReady_) return false;
     prepareSharedSpi();
     const int16_t status = radio_.startReceive();
     if (status != RADIOLIB_ERR_NONE) return recoverReceive(status, "rx-start");
@@ -341,11 +417,15 @@ bool LoRaService::consumeDio1Flag() {
 }
 
 void LoRaService::attachDio1() {
+    if (dio1Attached_) return;
     radio_.setDio1Action(&LoRaService::onDio1);
+    dio1Attached_ = true;
 }
 
 void LoRaService::detachDio1() {
+    if (!dio1Attached_) return;
     radio_.clearDio1Action();
+    dio1Attached_ = false;
 }
 
 void LoRaService::prepareSharedSpi() const {

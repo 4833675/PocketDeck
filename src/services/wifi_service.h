@@ -13,7 +13,12 @@ class WifiService {
 public:
     bool begin(bool enabled);
     void update(uint32_t nowMs);
+    // User permission and app-profile activation are independent. The radio
+    // runs only while both are true; System owns the activation policy.
     void setEnabled(bool enabled);
+    void setActive(bool active);
+    bool active() const { return active_; }
+    bool running() const { return runtimeRunning_; }
     bool startScan();
     bool connect(const char* ssid, const char* password);
     bool forgetNetwork(const char* ssid = nullptr);
@@ -50,6 +55,9 @@ private:
     void clearPendingCredentials();
     void scheduleAutoScan(uint32_t nowMs, uint32_t delayMs);
     void refreshLinkDetails(uint32_t nowMs);
+    void applyRuntimeState(uint32_t nowMs);
+    void startRuntime(uint32_t nowMs);
+    void stopRuntime(uint32_t nowMs);
     void setState(WifiState state, uint32_t nowMs);
     void requestTimeSync();
     void clearLinkDetails();
@@ -75,6 +83,11 @@ private:
     uint32_t connectedAtMs_ = 0;
     bool timeRequested_ = false;
     bool wasConnected_ = false;
+    bool initialized_ = false;
+    bool active_ = true;
+    bool runtimeRunning_ = false;
+    bool runtimeStateApplied_ = false;
+    bool legacyImportAttempted_ = false;
 };
 
 }  // namespace pd

@@ -14,13 +14,29 @@ constexpr uint16_t kMaxBytesPerUpdate = 2048;
 
 bool GpsService::begin() {
     Serial1.begin(kGpsBaud, SERIAL_8N1, kGpsRxPin, kGpsTxPin);
-    snapshot_.started = true;
+    snapshot_.started = static_cast<bool>(Serial1);
+    active_ = snapshot_.started;
     refreshSnapshot(millis());
-    return true;
+    return snapshot_.started;
+}
+
+void GpsService::setActive(bool active) {
+    const bool nextActive = active && snapshot_.started;
+    if (active_ == nextActive) return;
+
+    if (nextActive) {
+        // Keep the UART driver configured while suspended. Repeated end/begin
+        // cycles would churn scarce heap, and they do not power down the Cap's
+        // GPS receiver. Drop only the stale RX backlog before accepting fresh
+        // NMEA; TinyGPS++ will resynchronize at the next sentence boundary.
+        Serial1.flush(false);
+        refreshSnapshot(millis());
+    }
+    active_ = nextActive;
 }
 
 void GpsService::update() {
-    if (!snapshot_.started) return;
+    if (!active_ || !snapshot_.started) return;
     const uint32_t nowMs = millis();
     uint16_t processed = 0;
     while (Serial1.available() > 0 && processed < kMaxBytesPerUpdate) {

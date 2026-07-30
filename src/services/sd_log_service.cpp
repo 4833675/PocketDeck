@@ -4,6 +4,7 @@
 #include <cstdio>
 #include <cstring>
 #include <ctime>
+#include <limits>
 
 #include <Arduino.h>
 #include <FS.h>
@@ -40,18 +41,56 @@ constexpr std::array<const char*, 2> kLegacyLogPaths = {
 };
 constexpr std::time_t kPlausibleEpoch = 1704067200;  // 2024-01-01 UTC
 
+bool startsWith(const char* value, const char* prefix) {
+    if (value == nullptr || prefix == nullptr) return false;
+    return std::strncmp(value, prefix, std::strlen(prefix)) == 0;
+}
+
+bool writeLogLine(Print& output, const char* message, int64_t epochSeconds,
+                  uint32_t uptimeMs) {
+    char timestamp[32];
+    if (epochSeconds >= static_cast<int64_t>(kPlausibleEpoch)) {
+        const std::time_t eventTime = static_cast<std::time_t>(epochSeconds);
+        std::tm utc{};
+        gmtime_r(&eventTime, &utc);
+        std::snprintf(timestamp, sizeof(timestamp), "%04d-%02d-%02dT%02d:%02d:%02dZ",
+                      utc.tm_year + 1900, utc.tm_mon + 1, utc.tm_mday, utc.tm_hour,
+                      utc.tm_min, utc.tm_sec);
+    } else {
+        std::snprintf(timestamp, sizeof(timestamp), "TIME-UNSYNCED");
+    }
+
+    std::array<char, 256> line{};
+    const int length = std::snprintf(
+        line.data(), line.size(), "%s up=%010lu %s\n", timestamp,
+        static_cast<unsigned long>(uptimeMs), message != nullptr ? message : "");
+    if (length < 0 || static_cast<std::size_t>(length) >= line.size()) return false;
+    return output.print(line.data()) == static_cast<std::size_t>(length);
+}
+
 }  // namespace
 
 bool SdLogService::begin() {
-    return mount(false);
+    if (deferred_ || flushingDeferred_) return false;
+    if (!mount(false)) return false;
+    return flushDeferred();
 }
 
 bool SdLogService::remount() {
+    if (deferred_ || flushingDeferred_) {
+        Serial.println("[sd] remount blocked while logging is deferred");
+        return false;
+    }
     unmount();
-    return mount(false);
+    if (!mount(false)) return false;
+    return flushDeferred();
 }
 
 bool SdLogService::formatCard() {
+    if (deferred_ || flushingDeferred_) {
+        Serial.println("[sd] format blocked while logging is deferred");
+        return false;
+    }
     unmount();
     snapshot_.state = SdLogState::Formatting;
 
@@ -71,11 +110,26 @@ bool SdLogService::formatCard() {
     }
 
     snapshot_.linesWritten = 0;
+    resetDeferredBuffer();
     snapshot_.error.fill('\0');
     snapshot_.state = SdLogState::Ready;
     ready_ = true;
     refreshUsage();
     return true;
+}
+
+void SdLogService::setDeferred(bool deferred) {
+    if (deferred_ == deferred) {
+        if (!deferred && !flushingDeferred_ &&
+            (deferredCount_ > 0 || deferredDropped_ > 0)) {
+            flushDeferred();
+        }
+        return;
+    }
+    if (flushingDeferred_) return;
+
+    deferred_ = deferred;
+    if (!deferred_) flushDeferred();
 }
 
 bool SdLogService::beginSession(const char* firmwareVersion, const char* resetReason) {
@@ -89,7 +143,29 @@ bool SdLogService::beginSession(const char* firmwareVersion, const char* resetRe
 }
 
 bool SdLogService::append(const char* message) {
-    if (!ready_ || snapshot_.state != SdLogState::Ready || message == nullptr) return false;
+    if (message == nullptr) return false;
+    if (flushingDeferred_) {
+        noteDeferredDrop();
+        return false;
+    }
+    if (deferred_) {
+        if (!ready_ || snapshot_.state != SdLogState::Ready) {
+            noteDeferredDrop();
+            return false;
+        }
+        return enqueueDeferred(message);
+    }
+    if (!ready_ || snapshot_.state != SdLogState::Ready) return false;
+    if ((deferredCount_ > 0 || deferredDropped_ > 0) && !flushDeferred()) return false;
+
+    return appendNow(message, static_cast<int64_t>(std::time(nullptr)), millis());
+}
+
+bool SdLogService::appendNow(const char* message, int64_t epochSeconds, uint32_t uptimeMs) {
+    if (deferred_ || flushingDeferred_ || !ready_ ||
+        snapshot_.state != SdLogState::Ready || message == nullptr) {
+        return false;
+    }
     if (!rotateIfNeeded()) return false;
 
     File file = SD.open(kLogPath, FILE_APPEND);
@@ -98,26 +174,10 @@ bool SdLogService::append(const char* message) {
         return false;
     }
 
-    char timestamp[32];
-    const std::time_t now = std::time(nullptr);
-    if (now >= kPlausibleEpoch) {
-        std::tm utc{};
-        gmtime_r(&now, &utc);
-        std::snprintf(timestamp, sizeof(timestamp), "%04d-%02d-%02dT%02d:%02d:%02dZ",
-                      utc.tm_year + 1900, utc.tm_mon + 1, utc.tm_mday, utc.tm_hour,
-                      utc.tm_min, utc.tm_sec);
-    } else {
-        std::snprintf(timestamp, sizeof(timestamp), "TIME-UNSYNCED");
-    }
-
-    std::array<char, 256> line{};
-    std::snprintf(line.data(), line.size(), "%s up=%010lu %s\n", timestamp,
-                  static_cast<unsigned long>(millis()), message);
-    const size_t expected = std::strlen(line.data());
-    const size_t written = file.print(line.data());
+    const bool written = writeLogLine(file, message, epochSeconds, uptimeMs);
     file.flush();
     file.close();
-    if (written != expected) {
+    if (!written) {
         setError("Short write to system.log");
         return false;
     }
@@ -128,8 +188,16 @@ bool SdLogService::append(const char* message) {
 }
 
 bool SdLogService::dumpLogs(Print& output, bool includePrevious) {
+    if (deferred_ || flushingDeferred_) {
+        output.println("[console] TF log access is deferred during MEDIA playback");
+        return false;
+    }
     if (!ready_ || snapshot_.state != SdLogState::Ready) {
         output.println("[console] TF logging is not ready");
+        return false;
+    }
+    if ((deferredCount_ > 0 || deferredDropped_ > 0) && !flushDeferred()) {
+        output.println("[console] Could not flush deferred TF logs");
         return false;
     }
 
@@ -149,6 +217,10 @@ bool SdLogService::dumpLogs(Print& output, bool includePrevious) {
 }
 
 bool SdLogService::clearLogs() {
+    if (deferred_ || flushingDeferred_) {
+        Serial.println("[sd] clear blocked while logging is deferred");
+        return false;
+    }
     if (!ready_ || snapshot_.state != SdLogState::Ready) return false;
     const auto clearPath = [this](const char* path) {
         if (!SD.exists(path) || SD.remove(path)) return true;
@@ -163,6 +235,7 @@ bool SdLogService::clearLogs() {
         if (!clearPath(path)) return false;
     }
     snapshot_.linesWritten = 0;
+    resetDeferredBuffer();
     refreshUsage();
     return true;
 }
@@ -308,6 +381,154 @@ bool SdLogService::rotateIfNeeded() {
         return false;
     }
     return true;
+}
+
+bool SdLogService::enqueueDeferred(const char* message) {
+    const DeferredEventKind kind = classifyDeferredEvent(message);
+    if (kind == DeferredEventKind::None || deferredCount_ >= deferredEvents_.size()) {
+        noteDeferredDrop();
+        return false;
+    }
+
+    const std::size_t index = (deferredHead_ + deferredCount_) % deferredEvents_.size();
+    deferredEvents_[index] = {
+        static_cast<int64_t>(std::time(nullptr)),
+        millis(),
+        kind,
+    };
+    ++deferredCount_;
+    return true;
+}
+
+bool SdLogService::flushDeferred() {
+    if (deferred_ || flushingDeferred_) return false;
+    if (deferredCount_ == 0 && deferredDropped_ == 0) return true;
+    if (!ready_ || snapshot_.state != SdLogState::Ready) return false;
+
+    flushingDeferred_ = true;
+    if (!rotateIfNeeded()) {
+        flushingDeferred_ = false;
+        return false;
+    }
+
+    File file = SD.open(kLogPath, FILE_APPEND);
+    if (!file) {
+        flushingDeferred_ = false;
+        setError("Could not open system.log");
+        return false;
+    }
+
+    bool success = true;
+    while (deferredCount_ > 0) {
+        const DeferredEvent event = deferredEvents_[deferredHead_];
+        const char* message = deferredEventMessage(event.kind);
+        if (message == nullptr ||
+            !writeLogLine(file, message, event.epochSeconds, event.uptimeMs)) {
+            success = false;
+            break;
+        }
+
+        deferredEvents_[deferredHead_] = DeferredEvent{};
+        deferredHead_ = (deferredHead_ + 1) % deferredEvents_.size();
+        --deferredCount_;
+        ++snapshot_.linesWritten;
+    }
+
+    if (success && deferredDropped_ > 0) {
+        std::array<char, 64> droppedMessage{};
+        std::snprintf(droppedMessage.data(), droppedMessage.size(),
+                      "Deferred events dropped: %lu",
+                      static_cast<unsigned long>(deferredDropped_));
+        success = writeLogLine(file, droppedMessage.data(),
+                               static_cast<int64_t>(std::time(nullptr)), millis());
+        if (success) {
+            deferredDropped_ = 0;
+            ++snapshot_.linesWritten;
+        }
+    }
+
+    file.flush();
+    file.close();
+    flushingDeferred_ = false;
+    if (!success) {
+        setError("Short write flushing deferred logs");
+        return false;
+    }
+
+    deferredHead_ = 0;
+    refreshUsage();
+    return true;
+}
+
+void SdLogService::noteDeferredDrop() {
+    if (deferredDropped_ != std::numeric_limits<uint32_t>::max()) ++deferredDropped_;
+}
+
+void SdLogService::resetDeferredBuffer() {
+    for (auto& event : deferredEvents_) event = DeferredEvent{};
+    deferredHead_ = 0;
+    deferredCount_ = 0;
+    deferredDropped_ = 0;
+}
+
+SdLogService::DeferredEventKind SdLogService::classifyDeferredEvent(const char* message) {
+    if (startsWith(message, "MEDIA scan:") || startsWith(message, "MEDIA folder ")) {
+        return DeferredEventKind::MediaLibrary;
+    }
+    if (startsWith(message, "MEDIA ")) return DeferredEventKind::MediaPlayback;
+    if (startsWith(message, "App ")) return DeferredEventKind::AppState;
+    if (startsWith(message, "Quick settings") || startsWith(message, "Volume changed:") ||
+        startsWith(message, "Settings ") || startsWith(message, "Invalid settings")) {
+        return DeferredEventKind::Settings;
+    }
+    if (startsWith(message, "WiFi ")) return DeferredEventKind::Wifi;
+    if (startsWith(message, "BLE ") || startsWith(message, "Bluetooth ")) {
+        return DeferredEventKind::Bluetooth;
+    }
+    if (startsWith(message, "GPS ")) return DeferredEventKind::Gps;
+    if (startsWith(message, "Weather ") || startsWith(message, "NTP ")) {
+        return DeferredEventKind::Weather;
+    }
+    if (startsWith(message, "TF ")) return DeferredEventKind::Storage;
+    if (startsWith(message, "SSH ")) return DeferredEventKind::Ssh;
+    if (startsWith(message, "LoRa ")) return DeferredEventKind::Lora;
+    if (startsWith(message, "Async diagnostic events dropped:")) {
+        return DeferredEventKind::Diagnostics;
+    }
+    if (startsWith(message, "System ") || startsWith(message, "Resources ") ||
+        startsWith(message, "Factory ") ||
+        startsWith(message, "Boot ") || startsWith(message, "Board ") ||
+        startsWith(message, "=== Pocket Deck")) {
+        return DeferredEventKind::System;
+    }
+    return DeferredEventKind::None;
+}
+
+const char* SdLogService::deferredEventMessage(DeferredEventKind kind) {
+    switch (kind) {
+        case DeferredEventKind::AppState: return "Deferred event: app state changed";
+        case DeferredEventKind::MediaLibrary:
+            return "Deferred event: MEDIA library state changed";
+        case DeferredEventKind::MediaPlayback:
+            return "Deferred event: MEDIA playback state changed";
+        case DeferredEventKind::Settings: return "Deferred event: settings changed";
+        case DeferredEventKind::Wifi: return "Deferred event: WiFi state changed";
+        case DeferredEventKind::Bluetooth:
+            return "Deferred event: Bluetooth state changed";
+        case DeferredEventKind::Gps: return "Deferred event: GPS state changed";
+        case DeferredEventKind::Weather:
+            return "Deferred event: weather/time state changed";
+        case DeferredEventKind::Storage:
+            return "Deferred event: TF storage action requested";
+        case DeferredEventKind::Ssh: return "Deferred event: SSH state changed";
+        case DeferredEventKind::Lora: return "Deferred event: LoRa state changed";
+        case DeferredEventKind::System:
+            return "Deferred event: system lifecycle changed";
+        case DeferredEventKind::Diagnostics:
+            return "Deferred event: diagnostics queue dropped events";
+        case DeferredEventKind::None: return nullptr;
+    }
+    return nullptr;
 }
 
 void SdLogService::refreshUsage() {

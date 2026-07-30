@@ -10,8 +10,10 @@ struct SystemContext;
 struct StatusBarData {
     const char* title = "POCKET DECK";
     bool bleEnabled = true;
+    bool bleActive = false;
     bool bleConnected = false;
     bool wifiEnabled = false;
+    bool wifiActive = false;
     bool wifiConnected = false;
     bool clockValid = false;
     uint8_t clockHour = 0;

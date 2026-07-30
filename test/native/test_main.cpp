@@ -20,6 +20,7 @@
 #include "core/media_data.h"
 #include "core/input_router.h"
 #include "core/mac_keymap.h"
+#include "core/resource_policy.h"
 #include "core/serial_command.h"
 #include "core/ssh_error_detail.h"
 #include "core/ssh_hosts.h"
@@ -54,6 +55,49 @@ void captureDiagnostic(void* context, const char* message) {
 }
 
 }  // namespace
+
+TEST_CASE(app_resource_profiles_isolate_foreground_workloads) {
+    const auto launcher = resourceProfileFor(AppId::Launcher);
+    CHECK(!launcher.needs(RuntimeResource::Ble));
+    CHECK(!launcher.needs(RuntimeResource::Wifi));
+    CHECK(!launcher.needs(RuntimeResource::Gps));
+    CHECK(!launcher.needs(RuntimeResource::LoRa));
+
+    const auto keyboard = resourceProfileFor(AppId::Keyboard);
+    CHECK(keyboard.needs(RuntimeResource::Ble));
+    CHECK(!keyboard.needs(RuntimeResource::Wifi));
+
+    const auto ssh = resourceProfileFor(AppId::Ssh);
+    CHECK(ssh.needs(RuntimeResource::Wifi));
+    CHECK(!ssh.needs(RuntimeResource::Ble));
+
+    const auto gps = resourceProfileFor(AppId::Gps);
+    CHECK(gps.needs(RuntimeResource::Gps));
+    CHECK(!gps.needs(RuntimeResource::Wifi));
+
+    const auto lora = resourceProfileFor(AppId::LoRa);
+    CHECK(lora.needs(RuntimeResource::LoRa));
+    CHECK(!lora.needs(RuntimeResource::Gps));
+}
+
+TEST_CASE(weather_and_media_profiles_have_explicit_tradeoffs) {
+    const auto weather = resourceProfileFor(AppId::Weather);
+    CHECK(weather.needs(RuntimeResource::Wifi));
+    CHECK(weather.needs(RuntimeResource::Gps));
+    CHECK(!weather.needs(RuntimeResource::Ble));
+    CHECK(!weather.needs(RuntimeResource::LoRa));
+
+    const auto media = resourceProfileFor(AppId::Media);
+    CHECK(media.needs(RuntimeResource::MediaRealtime));
+    CHECK(!media.needs(RuntimeResource::Wifi));
+    CHECK(!media.needs(RuntimeResource::Ble));
+    CHECK(!media.needs(RuntimeResource::Gps));
+    CHECK(!media.needs(RuntimeResource::LoRa));
+
+    const auto settings = resourceProfileFor(AppId::Settings);
+    CHECK(settings.needs(RuntimeResource::Wifi));
+    CHECK(settings.needs(RuntimeResource::Ble));
+}
 
 TEST_CASE(ssh_error_detail_redacts_endpoint_identity) {
     std::array<char, 96> output{};
@@ -1558,6 +1602,8 @@ TEST_CASE(media_volume_request_is_explicit_and_consumed_once) {
 }
 
 int main() {
+    app_resource_profiles_isolate_foreground_workloads();
+    weather_and_media_profiles_have_explicit_tradeoffs();
     ssh_error_detail_redacts_endpoint_identity();
     ssh_error_detail_stays_single_line_and_never_partially_copies_secret();
     plain_a();

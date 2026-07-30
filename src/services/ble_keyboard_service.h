@@ -52,7 +52,14 @@ public:
     bool begin(const char* deviceName);
     void setDiagnostics(DiagnosticsService* diagnostics) { diagnostics_ = diagnostics; }
     void update(uint32_t nowMs);
+    // setEnabled() is the user's permission. System separately controls the
+    // app-profile activation; the NimBLE host remains initialized while paused.
     void setEnabled(bool enabled);
+    void setActive(bool active);
+    bool active() const { return active_.load(); }
+    bool running() const {
+        return initialized_.load() && enabled_.load() && active_.load();
+    }
     bool sendReport(const HidReport& report);
     void updateBattery(uint8_t percent);
     void disconnect();
@@ -92,6 +99,7 @@ private:
     BleKeyboardPolicy reportPolicy_;
     std::atomic<bool> initialized_{false};
     std::atomic<bool> enabled_{true};
+    std::atomic<bool> active_{true};
     std::atomic<bool> connected_{false};
     std::atomic<bool> encrypted_{false};
     std::atomic<bool> bonded_{false};

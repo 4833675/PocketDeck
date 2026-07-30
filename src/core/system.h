@@ -13,6 +13,7 @@
 #include "apps/weather/weather_app.h"
 #include "core/g0_gesture.h"
 #include "core/input_router.h"
+#include "core/resource_policy.h"
 #include "core/system_context.h"
 #include "core/system_settings.h"
 #include "drivers/board.h"
@@ -40,6 +41,7 @@ public:
 
 private:
     App* appForId(AppId id);
+    void applyResourceProfile(AppId id);
     void openApp(AppId id);
     void goHome();
     void openQuickSettings();
@@ -83,6 +85,7 @@ private:
     SettingsApp settingsApp_;
     QuickSettings quickSettings_;
     App* current_ = nullptr;
+    AppResourceProfile activeResources_{};
     BleKeyboardSnapshot lastBleSnapshot_{};
     bool lastBleSnapshotValid_ = false;
     GpsState lastGpsState_ = GpsState::NoData;

@@ -108,8 +108,10 @@ void System::begin() {
     const bool gpsReady = gps_.begin();
     diagnostics_.logf("GPS UART: %s 115200 RX15 TX13", gpsReady ? "ready" : "failed");
     bleKeyboard_.setDiagnostics(&diagnostics_);
+    bleKeyboard_.setActive(false);
     bleKeyboard_.setEnabled(settings_.bleEnabled);
     const bool bleReady = bleKeyboard_.begin(settings_.deviceName.data());
+    wifi_.setActive(false);
     const bool wifiReady = wifi_.begin(settings_.wifiEnabled);
     const bool weatherReady = weather_.begin();
     refreshContext(millis());
@@ -117,6 +119,7 @@ void System::begin() {
     trackWifiState(wifi_.snapshot());
     trackWeatherState(weather_.snapshot());
     current_ = &launcher_;
+    applyResourceProfile(current_->id());
     current_->onEnter(context_);
     diagnostics_.log("App active: LAUNCHER");
     diagnostics_.logf("System ready: DISP=%d BLE=%d GPS=%d WIFI=%d WX=%d",
@@ -271,11 +274,41 @@ App* System::appForId(AppId id) {
     return nullptr;
 }
 
+void System::applyResourceProfile(AppId id) {
+    const AppResourceProfile next = resourceProfileFor(id);
+    const bool realtimeMedia = next.needs(RuntimeResource::MediaRealtime);
+
+    // Stop synchronous TF event writes before shutting down background radios;
+    // their one-time disconnect diagnostics are retained in the bounded queue.
+    if (realtimeMedia) sdLog_.setDeferred(true);
+
+    const bool bleRequested = next.needs(RuntimeResource::Ble);
+    const bool wifiRequested = next.needs(RuntimeResource::Wifi);
+    const bool bleActive = settings_.bleEnabled && bleRequested;
+    const bool wifiActive = settings_.wifiEnabled && wifiRequested;
+    const bool gpsActive = next.needs(RuntimeResource::Gps);
+    const bool loraActive = next.needs(RuntimeResource::LoRa);
+    bleKeyboard_.setActive(bleRequested);
+    wifi_.setActive(wifiRequested);
+    gps_.setActive(gpsActive);
+    lora_.setActive(loraActive);
+    activeResources_ = next;
+
+    // Leaving MEDIA happens only after MediaApp::onExit closes the MP3 file, so
+    // flushing queued events cannot contend with an active decoder read.
+    if (!realtimeMedia) sdLog_.setDeferred(false);
+    diagnostics_.logf("Resources app=%s BLE=%d WIFI=%d GPS=%d LORA=%d LOG=%s",
+                      appName(id), bleActive ? 1 : 0, wifiActive ? 1 : 0,
+                      gpsActive ? 1 : 0, loraActive ? 1 : 0,
+                      realtimeMedia ? "deferred" : "active");
+}
+
 void System::openApp(AppId id) {
     App* next = appForId(id);
     if (next == nullptr || next == current_) return;
     diagnostics_.logf("App switch: %s -> %s", appName(current_->id()), appName(id));
     current_->onExit(context_);
+    applyResourceProfile(id);
     current_ = next;
     current_->onEnter(context_);
 }
@@ -306,7 +339,10 @@ void System::handleQuickSettingsResult(const QuickSettingsResult& result) {
         settings_.bleEnabled = values.bleEnabled;
         board_.setBrightness(settings_.brightness);
         board_.setVolume(settings_.volume);
-        if (bleChanged) bleKeyboard_.setEnabled(settings_.bleEnabled);
+        if (bleChanged) {
+            bleKeyboard_.setEnabled(settings_.bleEnabled);
+            applyResourceProfile(current_ != nullptr ? current_->id() : AppId::Launcher);
+        }
     }
     if (result.closed && result.persist) {
         diagnostics_.logf("Quick settings saved: brightness=%u volume=%u BLE=%d",
@@ -323,6 +359,7 @@ void System::handleSystemCommand(SystemCommand command) {
         case SystemCommand::ToggleWifi:
             settings_.wifiEnabled = !settings_.wifiEnabled;
             wifi_.setEnabled(settings_.wifiEnabled);
+            applyResourceProfile(current_ != nullptr ? current_->id() : AppId::Launcher);
             diagnostics_.log(settings_.wifiEnabled ? "WiFi enabled" : "WiFi disabled");
             saveSettings();
             return;
@@ -350,6 +387,7 @@ void System::handleSystemCommand(SystemCommand command) {
         case SystemCommand::ToggleBluetooth:
             settings_.bleEnabled = !settings_.bleEnabled;
             bleKeyboard_.setEnabled(settings_.bleEnabled);
+            applyResourceProfile(current_ != nullptr ? current_->id() : AppId::Launcher);
             diagnostics_.log(settings_.bleEnabled ? "Bluetooth enabled" : "Bluetooth disabled");
             saveSettings();
             return;
@@ -426,9 +464,13 @@ void System::refreshContext(uint32_t nowMs) {
     context_.minimumFreeHeap = ESP.getMinFreeHeap();
     const BleKeyboardSnapshot ble = bleKeyboard_.snapshot();
     context_.bleEnabled = ble.enabled;
+    context_.bleActive = settings_.bleEnabled &&
+                         activeResources_.needs(RuntimeResource::Ble);
     context_.bleConnected = ble.state == BleKeyboardState::Connected;
     const WifiSnapshot& wifi = wifi_.snapshot();
     context_.wifiEnabled = wifi.enabled;
+    context_.wifiActive = settings_.wifiEnabled &&
+                          activeResources_.needs(RuntimeResource::Wifi);
     context_.wifiConnected = wifi.connected;
     const ClockDisplay localClock = clockFromUtcEpoch(
         static_cast<int64_t>(std::time(nullptr)), config::kLocalUtcOffsetSeconds);

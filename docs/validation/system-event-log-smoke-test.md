@@ -1,6 +1,6 @@
 # Pocket Deck System Event Log Hardware Smoke Test
 
-Target firmware: `0.7.1` on M5Stack Cardputer Adv with a disposable or backed-up
+Target firmware: `0.8.0` on M5Stack Cardputer Adv with a disposable or backed-up
 FAT32 TF card. Do not format or clear logs while diagnosing an unresolved issue.
 
 | ID | Action | Expected evidence | Status | Notes |

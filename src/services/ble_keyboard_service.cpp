@@ -172,7 +172,7 @@ bool BleKeyboardService::begin(const char* deviceName) {
 
     initialized_.store(true);
     error_.store(BleKeyboardError::None);
-    if (enabled_.load()) startAdvertising();
+    if (running()) startAdvertising();
     char message[64];
     std::snprintf(message, sizeof(message), "BLE HID ready (NimBLE), bonded=%d",
                   bonded_.load() ? 1 : 0);
@@ -181,7 +181,7 @@ bool BleKeyboardService::begin(const char* deviceName) {
 }
 
 void BleKeyboardService::update(uint32_t nowMs) {
-    if (!advertisingPending_.load() || !enabled_.load() || connected_.load()) return;
+    if (!running() || !advertisingPending_.load() || connected_.load()) return;
     const uint32_t dueMs = advertisingDueMs_.load();
     if (!BleKeyboardPolicy::deadlineReached(nowMs, dueMs)) return;
     if (!advertisingPending_.exchange(false)) return;
@@ -189,21 +189,38 @@ void BleKeyboardService::update(uint32_t nowMs) {
 }
 
 void BleKeyboardService::setEnabled(bool enabled) {
+    const bool wasRunning = running();
     enabled_.store(enabled);
     if (!initialized_.load()) return;
-    if (!enabled) {
+    const bool shouldRun = running();
+    if (wasRunning == shouldRun) return;
+    if (!shouldRun) {
         advertisingPending_.store(false);
-        disconnect();
         NimBLEDevice::stopAdvertising();
-        reportPolicy_.setConnected(false);
+        disconnect();
+        return;
+    }
+    requestAdvertising(0);
+}
+
+void BleKeyboardService::setActive(bool active) {
+    const bool wasRunning = running();
+    active_.store(active);
+    if (!initialized_.load()) return;
+    const bool shouldRun = running();
+    if (wasRunning == shouldRun) return;
+    if (!shouldRun) {
+        advertisingPending_.store(false);
+        NimBLEDevice::stopAdvertising();
+        disconnect();
         return;
     }
     requestAdvertising(0);
 }
 
 bool BleKeyboardService::sendReport(const HidReport& report) {
-    const bool ready = initialized_.load() && enabled_.load() && connected_.load() &&
-                       encrypted_.load() && inputReport_ != nullptr;
+    const bool ready = running() && connected_.load() && encrypted_.load() &&
+                       inputReport_ != nullptr;
     reportPolicy_.setConnected(ready);
     if (!ready) return false;
 
@@ -259,7 +276,7 @@ BleKeyboardSnapshot BleKeyboardService::snapshot() const {
     result.lastDisconnectReason = lastDisconnectReason_.load();
     result.error = error_.load();
 
-    if (!result.enabled) {
+    if (!running()) {
         result.state = BleKeyboardState::Disabled;
     } else if (result.error != BleKeyboardError::None) {
         result.state = BleKeyboardState::Error;
@@ -291,6 +308,14 @@ void BleKeyboardService::handleConnect(uint16_t connectionId, const uint8_t* pee
     advertisingPending_.store(false);
     pendingDisconnectReason_.store(-1);
     pendingSecurityStatus_.store(0);
+    connectionId_.store(connectionId);
+    if (!running()) {
+        connected_.store(false);
+        encrypted_.store(false);
+        reportPolicy_.setConnected(false);
+        if (server_ != nullptr) server_->disconnect(connectionId);
+        return;
+    }
 
     const int bondCount = NimBLEDevice::getNumBonds();
     const bool hasBond = bondCount > 0;
@@ -299,7 +324,6 @@ void BleKeyboardService::handleConnect(uint16_t connectionId, const uint8_t* pee
                                nativeAddress(peerIdentityAddress, peerIdentityAddressType));
     bondedAtConnect_.store(hasBond);
     pairingRejected_.store(false);
-    connectionId_.store(connectionId);
     connected_.store(true);
     encrypted_.store(false);
     error_.store(BleKeyboardError::None);
@@ -362,6 +386,15 @@ void BleKeyboardService::handleAuthentication(bool encrypted, bool authenticated
                                               bool linkBonded,
                                               const uint8_t* peerIdentityAddress,
                                               uint8_t peerIdentityAddressType) {
+    if (!running()) {
+        encrypted_.store(false);
+        reportPolicy_.setConnected(false);
+        if (server_ != nullptr && connected_.load()) {
+            server_->disconnect(connectionId_.load());
+        }
+        return;
+    }
+
     const int securityStatus = pendingSecurityStatus_.exchange(0);
     char identityText[18];
     formatNativeAddress(identityText, sizeof(identityText), peerIdentityAddress);
@@ -408,6 +441,7 @@ void BleKeyboardService::handleAuthentication(bool encrypted, bool authenticated
 }
 
 bool BleKeyboardService::allowNewPairing(const char* eventName) {
+    if (!running()) return false;
     if (BleKeyboardPolicy::newPairingAllowed(bondedAtConnect_.load())) return true;
     if (!pairingRejected_.exchange(true)) {
         error_.store(BleKeyboardError::UnauthorizedPeer);
@@ -423,7 +457,7 @@ bool BleKeyboardService::allowNewPairing(const char* eventName) {
 }
 
 void BleKeyboardService::startAdvertising() {
-    if (!initialized_.load() || !enabled_.load() || connected_.load()) return;
+    if (!running() || connected_.load()) return;
     const bool started = NimBLEDevice::startAdvertising();
     char message[72];
     std::snprintf(message, sizeof(message), "BLE advertising start requested result=%d",
@@ -432,7 +466,7 @@ void BleKeyboardService::startAdvertising() {
 }
 
 void BleKeyboardService::requestAdvertising(uint32_t delayMs) {
-    if (!initialized_.load() || !enabled_.load()) return;
+    if (!running()) return;
     advertisingDueMs_.store(millis() + delayMs);
     advertisingPending_.store(true);
 }

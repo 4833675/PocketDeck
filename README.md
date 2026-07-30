@@ -9,7 +9,7 @@ diagnostics.
 It is a from-scratch project, not a Claude Desktop Buddy fork, and it does not
 support the original Cardputer model.
 
-Current firmware: **0.7.1**
+Current firmware: **0.8.0**
 
 ## Features
 
@@ -24,6 +24,8 @@ Current firmware: **0.7.1**
 - Raw LoRa P2P text terminal for a matching SX1262/RadioLib peer.
 - Foreground MP3 player with four-level folder browsing and Chinese filenames
   under `/Music` on a TF card.
+- Foreground resource profiles: each app runs only the radios and peripherals
+  it needs; MEDIA suspends wireless/GPS/LoRa work and defers TF event writes.
 - Versioned Preferences/NVS settings and confirmed destructive actions.
 - On-device diagnostics plus privacy-safe event logs for every app/service on a
   TF/microSD card.
@@ -90,8 +92,9 @@ The Cardputer has no dedicated arrow cluster, so local navigation uses Fn:
 
 Home contains Keyboard, SSH Terminal, GPS, LORA, MEDIA, Weather, and Settings.
 The status bar shows local 24-hour time, `WiFi`, `BT`, and battery percentage.
-Wi-Fi and Bluetooth are mint when connected, amber when enabled but
-disconnected, and red when disabled.
+Wi-Fi and Bluetooth are mint when connected, amber when active but
+disconnected, red when explicitly disabled, and muted gray when the foreground
+app has suspended them.
 
 Quick Settings uses Left/Right for brightness, Up/Down for volume, Enter to
 toggle Bluetooth, and Backspace or G0 to close and save.
