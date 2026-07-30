@@ -26,7 +26,7 @@ struct SdLogSnapshot {
 class SdLogService {
 public:
     static constexpr const char* kDirectory = "/PocketDeck";
-    static constexpr const char* kLogPath = "/PocketDeck/ble.log";
+    static constexpr const char* kLogPath = "/PocketDeck/system.log";
 
     bool begin();
     bool remount();

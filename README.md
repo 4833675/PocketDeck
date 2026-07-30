@@ -9,7 +9,7 @@ diagnostics.
 It is a from-scratch project, not a Claude Desktop Buddy fork, and it does not
 support the original Cardputer model.
 
-Current firmware: **0.7.0**
+Current firmware: **0.7.1**
 
 ## Features
 
@@ -25,7 +25,8 @@ Current firmware: **0.7.0**
 - Foreground MP3 player with four-level folder browsing and Chinese filenames
   under `/Music` on a TF card.
 - Versioned Preferences/NVS settings and confirmed destructive actions.
-- On-device diagnostics plus optional rotating logs on a TF/microSD card.
+- On-device diagnostics plus privacy-safe event logs for every app/service on a
+  TF/microSD card.
 
 Not currently implemented: microphone/dictation, LoRaWAN, IR, SFTP, SSH tunnels,
 MQTT, Home Assistant, OTA updates, or Claude integration.
@@ -328,8 +329,15 @@ binaries.
 
 Settings > System > Diagnostics shows reset reason, memory and recent events.
 For persistent history, insert a TF card and restart. The active log is
-`/PocketDeck/ble.log`; it rotates at 512 KB to `ble-prev.log`. Despite the
-filename, it also contains system, Wi-Fi, GPS, weather, and storage events.
+`/PocketDeck/system.log`. At 4 MB it rotates through `system-1.log`,
+`system-2.log`, and `system-3.log`, retaining up to about 16 MB. Old
+`ble.log`/`ble-prev.log` files from earlier firmware remain readable with
+`LOG DUMP ALL`.
+
+Logging is event-based rather than frame- or keystroke-based. It records boot,
+application switches, MEDIA scans/folder depth/playback state, BLE, Wi-Fi, GPS
+receiver health, weather, SSH, LoRa, Settings, and TF storage events without
+adding continuous SD writes to the main loop.
 
 Settings > System > TF card logs can retry mounting or format the card after a
 separate confirmation. Formatting erases the entire card.
@@ -341,11 +349,12 @@ Logs can be read over USB without removing the card:
 | `HELP` | List commands |
 | `LOG STATUS` | Show card/logger state |
 | `LOG DUMP` | Print the current log |
-| `LOG DUMP ALL` | Print previous and current logs |
-| `LOG CLEAR YES` | Erase both logs and start a new session |
+| `LOG DUMP ALL` | Print archived, legacy, and current logs |
+| `LOG CLEAR YES` | Erase all logs and start a new session |
 
-Typed keyboard content, Wi-Fi passwords, pairing codes, and precise GPS
-coordinates are deliberately excluded from diagnostics.
+Typed keyboard/SSH content, Wi-Fi passwords, pairing codes, precise GPS
+coordinates, MEDIA filenames/audio, and LoRa payloads are deliberately excluded
+from diagnostics.
 
 ## Reset and stored data
 
@@ -371,7 +380,8 @@ coordinates are deliberately excluded from diagnostics.
 - **MEDIA says `NO TF CARD`:** mount the card under Settings > System > TF card
   logs, then return to MEDIA and press Tab.
 - **MEDIA says `NO MP3 FILES`:** copy MP3 files into `/Music` or a folder no
-  deeper than four levels; other audio formats are ignored.
+  deeper than four levels; other audio formats are ignored. Firmware before
+  0.7.0 cannot see nested folders.
 - **MEDIA says `OUT OF MEMORY`:** restart Pocket Deck before playing, especially
   after opening SSH; the device has no PSRAM.
 - **Weather will not update:** verify a fresh GPS fix, Wi-Fi/IP, and NTP, then
@@ -394,6 +404,7 @@ coordinates are deliberately excluded from diagnostics.
 - [GPS hardware checklist](docs/validation/gps-smoke-test.md)
 - [LoRa text-terminal checklist](docs/validation/lora-text-terminal-smoke-test.md)
 - [MEDIA MP3 checklist](docs/validation/media-mp3-smoke-test.md)
+- [System event-log checklist](docs/validation/system-event-log-smoke-test.md)
 
 Source layout:
 

@@ -50,6 +50,21 @@ const char* sdLogStateName(SdLogState state) {
     return "unknown";
 }
 
+const char* appName(AppId id) {
+    switch (id) {
+        case AppId::Launcher: return "LAUNCHER";
+        case AppId::Keyboard: return "KEYBOARD";
+        case AppId::Ssh: return "SSH";
+        case AppId::Gps: return "GPS";
+        case AppId::LoRa: return "LORA";
+        case AppId::Media: return "MEDIA";
+        case AppId::Weather: return "WEATHER";
+        case AppId::Settings: return "SETTINGS";
+        case AppId::None: return "NONE";
+    }
+    return "UNKNOWN";
+}
+
 }  // namespace
 
 System::System() : g0Gesture_(config::kG0LongPressMs, 25) {}
@@ -87,7 +102,7 @@ void System::begin() {
     bool sdReady = sdLog_.begin();
     if (sdReady) sdReady = sdLog_.beginSession(config::kFirmwareVersion, context_.resetReason);
     diagnostics_.setSink(&SdLogService::diagnosticsSink, &sdLog_, true);
-    diagnostics_.logf("TF logging: %s", sdReady ? "ready /PocketDeck/ble.log"
+    diagnostics_.logf("TF logging: %s", sdReady ? "ready /PocketDeck/system.log"
                                                 : "unavailable");
     const bool canvasReady = display_.begin();
     const bool gpsReady = gps_.begin();
@@ -103,6 +118,7 @@ void System::begin() {
     trackWeatherState(weather_.snapshot());
     current_ = &launcher_;
     current_->onEnter(context_);
+    diagnostics_.log("App active: LAUNCHER");
     diagnostics_.logf("System ready: DISP=%d BLE=%d GPS=%d WIFI=%d WX=%d",
                       canvasReady ? 1 : 0, bleReady ? 1 : 0, gpsReady ? 1 : 0,
                       wifiReady ? 1 : 0, weatherReady ? 1 : 0);
@@ -209,9 +225,9 @@ void System::executeSerialCommand(const char* command) {
         case SerialCommand::None: return;
         case SerialCommand::Help:
             Serial.println("[console] LOG STATUS    show TF logger state");
-            Serial.println("[console] LOG DUMP      output /PocketDeck/ble.log");
-            Serial.println("[console] LOG DUMP ALL  output previous and current logs");
-            Serial.println("[console] LOG CLEAR YES erase both logs and start a new session");
+            Serial.println("[console] LOG DUMP      output /PocketDeck/system.log");
+            Serial.println("[console] LOG DUMP ALL  output archived, legacy, and current logs");
+            Serial.println("[console] LOG CLEAR YES erase all logs and start a new session");
             return;
         case SerialCommand::LogStatus: {
             const SdLogSnapshot storage = sdLog_.snapshot();
@@ -258,6 +274,7 @@ App* System::appForId(AppId id) {
 void System::openApp(AppId id) {
     App* next = appForId(id);
     if (next == nullptr || next == current_) return;
+    diagnostics_.logf("App switch: %s -> %s", appName(current_->id()), appName(id));
     current_->onExit(context_);
     current_ = next;
     current_->onEnter(context_);
@@ -272,9 +289,11 @@ void System::openQuickSettings() {
     if (current_->id() == AppId::Keyboard) bleKeyboard_.sendReport(HidReport{});
     context_.activeModifiers = 0;
     quickSettings_.open({settings_.brightness, settings_.volume, settings_.bleEnabled});
+    diagnostics_.logf("Quick settings opened from %s", appName(current_->id()));
 }
 
 void System::closeQuickSettings() {
+    diagnostics_.log("Quick settings close requested");
     handleQuickSettingsResult(quickSettings_.close());
 }
 
@@ -289,7 +308,13 @@ void System::handleQuickSettingsResult(const QuickSettingsResult& result) {
         board_.setVolume(settings_.volume);
         if (bleChanged) bleKeyboard_.setEnabled(settings_.bleEnabled);
     }
-    if (result.closed && result.persist) saveSettings();
+    if (result.closed && result.persist) {
+        diagnostics_.logf("Quick settings saved: brightness=%u volume=%u BLE=%d",
+                          static_cast<unsigned>(settings_.brightness),
+                          static_cast<unsigned>(settings_.volume),
+                          settings_.bleEnabled ? 1 : 0);
+        saveSettings();
+    }
 }
 
 void System::handleSystemCommand(SystemCommand command) {
@@ -318,7 +343,7 @@ void System::handleSystemCommand(SystemCommand command) {
             const bool targeted = context_.takeWifiForgetRequest(ssid);
             const bool forgotten = wifi_.forgetNetwork(targeted ? ssid.data() : nullptr);
             diagnostics_.logf("WiFi forget %s: %s",
-                              targeted ? ssid.data() : "all networks",
+                              targeted ? "one network" : "all networks",
                               forgotten ? "complete" : "failed");
             return;
         }
@@ -366,6 +391,8 @@ void System::handleSystemCommand(SystemCommand command) {
                 settings_.volume = static_cast<uint8_t>(adjusted);
                 context_.volumePercent = settings_.volume;
                 board_.setVolume(settings_.volume);
+                diagnostics_.logf("Volume changed: %u",
+                                  static_cast<unsigned>(settings_.volume));
                 saveSettings();
             }
             return;
@@ -434,6 +461,19 @@ void System::trackGpsState(const GpsSnapshot& snapshot) {
         diagnostics_.logf("GPS state: %s", gpsStateLabel(state));
         lastGpsState_ = state;
         lastGpsStateValid_ = true;
+    }
+    constexpr uint32_t kGpsHealthLogIntervalMs = 60000;
+    if (context_.uptimeMs - lastGpsHealthLogMs_ >= kGpsHealthLogIntervalMs &&
+        snapshot.charsProcessed != lastGpsHealthChars_) {
+        diagnostics_.logf(
+            "GPS health: rx=%lu ok=%lu err=%lu fix=%lu sats=%lu",
+            static_cast<unsigned long>(snapshot.charsProcessed),
+            static_cast<unsigned long>(snapshot.sentencesPassed),
+            static_cast<unsigned long>(snapshot.checksumFailed),
+            static_cast<unsigned long>(snapshot.sentencesWithFix),
+            static_cast<unsigned long>(snapshot.satellitesValid ? snapshot.satellites : 0));
+        lastGpsHealthLogMs_ = context_.uptimeMs;
+        lastGpsHealthChars_ = snapshot.charsProcessed;
     }
 }
 

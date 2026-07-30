@@ -51,6 +51,9 @@ pio device monitor -e cardputer-adv
   the built-in M5GFX font and must not introduce a LittleFS dependency.
 - Native USB re-enumerates on reset; a monitor attached afterward may miss early
   serial output. Persistent TF logs are the reliable boot-history source.
+- Persistent diagnostics use bounded state-change events in
+  `/PocketDeck/system.log`, not per-frame or per-key logging. Every app/service
+  should expose useful lifecycle/error evidence without sensitive payloads.
 
 ## Architecture boundaries
 

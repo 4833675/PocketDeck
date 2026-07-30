@@ -18,8 +18,15 @@ public:
 
 private:
     void scan(SystemContext& context, bool resetToRoot);
+    void logPlaybackState(SystemContext& context);
 
     MediaAppModel model_{};
+    bool playbackLogValid_ = false;
+    uint8_t loggedState_ = 0;
+    uint8_t loggedEntryCount_ = 0;
+    uint8_t loggedDirectoryDepth_ = 0;
+    uint8_t loggedCurrentIndex_ = 0;
+    bool loggedHasCurrent_ = false;
 };
 
 }  // namespace pd

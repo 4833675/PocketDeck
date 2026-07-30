@@ -392,7 +392,7 @@ void drawStorage(M5Canvas& canvas, const SettingsModel& model,
     canvas.drawString(line, 121, 64);
     canvas.setTextColor(theme::kMuted, theme::kBackground);
     canvas.drawString("/PocketDeck/", 121, 81);
-    canvas.drawString("ble.log", 121, 96);
+    canvas.drawString("system.log", 121, 96);
     if (storage.state != SdLogState::Ready && storage.error[0] != '\0') {
         canvas.setTextColor(theme::kWarning, theme::kBackground);
         canvas.drawString(storage.error.data(), 7, 103);

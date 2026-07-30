@@ -87,6 +87,8 @@ private:
     bool lastBleSnapshotValid_ = false;
     GpsState lastGpsState_ = GpsState::NoData;
     bool lastGpsStateValid_ = false;
+    uint32_t lastGpsHealthLogMs_ = 0;
+    uint32_t lastGpsHealthChars_ = 0;
     WifiState lastWifiState_ = WifiState::Disabled;
     bool lastWifiStateValid_ = false;
     uint32_t lastWifiScanGeneration_ = 0;

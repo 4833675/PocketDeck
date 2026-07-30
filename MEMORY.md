@@ -8,7 +8,7 @@ This is the current handoff for the Pocket Deck repository. Read it with
 ## Current state
 
 - Repository: `https://github.com/4833675/PocketDeck`, branch `main`.
-- Current integration is `v0.7.0`: multi-profile Wi-Fi, Pocket SSH Terminal,
+- Current integration is `v0.7.1`: multi-profile Wi-Fi, Pocket SSH Terminal,
   four-page GPS, raw LoRa P2P, and a hierarchical Chinese-capable TF-card MP3
   player are included with the shell, BLE keyboard, weather, and diagnostics.
 - The previous `v0.5.0` image was flashed without clearing NVS. Real-device validation
@@ -17,16 +17,16 @@ This is the current handoff for the Pocket Deck repository. Read it with
   Terminal typing, controls, scrollback, and reconnect scenarios remain pending.
 - Integrated MEDIA/LoRa/GPS automated validation: `scripts/test-native.sh`
   passed 920 checks; `pio run -e cardputer-adv` with ESP8266Audio 2.2.0 and
-  RadioLib 7.7.1 used 90,608 / 327,680 bytes RAM (27.7%) and 2,076,665 /
-  3,145,728 bytes flash (66.0%). Only the pre-existing
+  RadioLib 7.7.1 used 90,624 / 327,680 bytes RAM (27.7%) and 2,078,353 /
+  3,145,728 bytes flash (66.1%). Only the pre-existing
   LibSSH-ESP32 compiler warnings remain.
 - No LoRa Cap, antenna, RF, or two-endpoint hardware claim has been made.
-- The `v0.6.0` MEDIA image was uploaded without erasing NVS on 2026-07-30; the
-  USB console answered `HELP` after restart. MEDIA and LORA were not opened, so
-  the upload proves normal boot/main-loop responsiveness only, not MP3/audio,
-  Cap, or RF behavior.
-- The `v0.7.0` image is built but not flashed. Its four-level browser, Chinese
-  font, 128 kbps playback tuning, and regressions still require device testing.
+- A MEDIA `tracks=0` incident was traced from TF evidence to stale v0.6 firmware,
+  whose scanner was non-recursive. v0.7.0 and then v0.7.1 were uploaded without
+  clearing NVS; USB `HELP` confirmed the new `system.log` command path.
+- The TF card was still in the Mac reader, so `LOG STATUS` correctly reported
+  `mounted=0`. Hierarchical scan, Chinese rendering, playback, and persistent
+  v0.7.1 event logging remain pending after the card is inserted in the device.
 - Real-device logs confirmed BLE reconnect, successful Wi-Fi scans, and a manual
   Tab scan (`raw=29`, strongest 8 displayed). The one migrated saved SSID was
   not visible at the test location (`candidates=0`), which is expected.
@@ -55,8 +55,8 @@ Current apps and services:
 - Wi-Fi manager with eight profiles, NTP clock, and GPS-local Open-Meteo weather.
 - Pocket SSH Terminal with six NVS host entries, one PTY shell, public-key auth,
   40×13 ANSI display, 64-line scrollback, reconnect, and quick commands.
-- Quick Settings, Preferences/NVS settings, on-device diagnostics, and optional
-  persistent TF-card logs with USB serial dump commands.
+- Quick Settings, Preferences/NVS settings, on-device diagnostics, and unified
+  privacy-safe TF event logs with USB serial dump commands.
 - No microphone/dictation, Claude integration, LoRaWAN, encryption/ACK/retry,
   IR, SFTP, SSH tunnels, MQTT, or Home Assistant feature yet.
 
@@ -130,8 +130,10 @@ Current apps and services:
   use built-in `efontCN_14`; never log filenames or audio content.
 - MEDIA uses M5's 1,536-sample speaker buffers and renders at 10 Hz to reduce
   underruns. Recommend 128 kbps / 44.1 kHz; hardware confirmation is pending.
-- TF logging closes each append so unexpected power loss does not strand a long
-  buffered session. Logs rotate at 512 KB.
+- TF logging closes each event so unexpected power loss does not strand a long
+  buffered session. `system.log` rotates at 4 MB through three archives; legacy
+  `ble*.log` remains dump/clear compatible. Log state changes, never hot loops,
+  key/terminal text, passwords, exact coordinates, filenames, or radio payloads.
 - The repository never contains the SSH private key. PlatformIO reads an
   external text key and generates its array only under ignored `.pio/`; the
   resulting firmware binary does contain the key and must not be shared.
@@ -164,9 +166,9 @@ Serial log commands: `HELP`, `LOG STATUS`, `LOG DUMP`, `LOG DUMP ALL`, and
 
 ## Near-term validation
 
-1. Flash `v0.7.0`, then run `docs/validation/media-mp3-smoke-test.md`; verify
-   Chinese hierarchy navigation, 128 kbps continuity, speaker/AUX,
-   pause/skip/auto-next, TF logs, memory, and regressions.
+1. Insert the prepared TF card, restart v0.7.1, then run the MEDIA and system-log
+   checklists; verify Chinese hierarchy navigation, 128 kbps continuity,
+   playback controls, `system.log`, memory, and regressions.
 2. Run `docs/validation/lora-text-terminal-smoke-test.md` with antenna attached
    and a matching second SX1262/RadioLib endpoint; all RF, shared-SPI, and
    regression rows remain pending until observed.

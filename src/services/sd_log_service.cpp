@@ -23,8 +23,21 @@ constexpr int8_t kSdCsPin = 12;
 constexpr int8_t kSharedLoraCsPin = 5;
 // Log throughput is tiny; favor signal margin and broad SDXC compatibility.
 constexpr uint32_t kSdFrequency = 4000000;
-constexpr uint32_t kRotateBytes = 512u * 1024u;
-constexpr const char* kPreviousLogPath = "/PocketDeck/ble-prev.log";
+constexpr uint32_t kRotateBytes = 4u * 1024u * 1024u;
+// Keep three archives plus the active log. Significant events are logged, not
+// loop iterations, so this provides long history without turning LOG DUMP ALL
+// into an unbounded operation.
+constexpr std::array<const char*, 3> kArchiveLogPaths = {
+    "/PocketDeck/system-1.log",
+    "/PocketDeck/system-2.log",
+    "/PocketDeck/system-3.log",
+};
+// v0.6 and earlier used a misleading BLE-specific filename for the shared log.
+// Preserve read/clear compatibility instead of silently orphaning that history.
+constexpr std::array<const char*, 2> kLegacyLogPaths = {
+    "/PocketDeck/ble-prev.log",
+    "/PocketDeck/ble.log",
+};
 constexpr std::time_t kPlausibleEpoch = 1704067200;  // 2024-01-01 UTC
 
 }  // namespace
@@ -81,7 +94,7 @@ bool SdLogService::append(const char* message) {
 
     File file = SD.open(kLogPath, FILE_APPEND);
     if (!file) {
-        setError("Could not open ble.log");
+        setError("Could not open system.log");
         return false;
     }
 
@@ -105,7 +118,7 @@ bool SdLogService::append(const char* message) {
     file.flush();
     file.close();
     if (written != expected) {
-        setError("Short write to ble.log");
+        setError("Short write to system.log");
         return false;
     }
 
@@ -121,8 +134,14 @@ bool SdLogService::dumpLogs(Print& output, bool includePrevious) {
     }
 
     bool dumped = false;
-    if (includePrevious && SD.exists(kPreviousLogPath)) {
-        dumped = dumpFile(output, kPreviousLogPath) || dumped;
+    if (includePrevious) {
+        for (const char* path : kLegacyLogPaths) {
+            if (SD.exists(path)) dumped = dumpFile(output, path) || dumped;
+        }
+        for (std::size_t index = kArchiveLogPaths.size(); index > 0; --index) {
+            const char* path = kArchiveLogPaths[index - 1];
+            if (SD.exists(path)) dumped = dumpFile(output, path) || dumped;
+        }
     }
     if (SD.exists(kLogPath)) dumped = dumpFile(output, kLogPath) || dumped;
     if (!dumped) output.println("[console] No log files found");
@@ -131,13 +150,17 @@ bool SdLogService::dumpLogs(Print& output, bool includePrevious) {
 
 bool SdLogService::clearLogs() {
     if (!ready_ || snapshot_.state != SdLogState::Ready) return false;
-    if (SD.exists(kLogPath) && !SD.remove(kLogPath)) {
-        setError("Could not clear ble.log");
+    const auto clearPath = [this](const char* path) {
+        if (!SD.exists(path) || SD.remove(path)) return true;
+        setError("Could not clear system log");
         return false;
+    };
+    if (!clearPath(kLogPath)) return false;
+    for (const char* path : kArchiveLogPaths) {
+        if (!clearPath(path)) return false;
     }
-    if (SD.exists(kPreviousLogPath) && !SD.remove(kPreviousLogPath)) {
-        setError("Could not clear old log");
-        return false;
+    for (const char* path : kLegacyLogPaths) {
+        if (!clearPath(path)) return false;
     }
     snapshot_.linesWritten = 0;
     refreshUsage();
@@ -267,12 +290,21 @@ bool SdLogService::rotateIfNeeded() {
     current.close();
     if (size < kRotateBytes) return true;
 
-    if (SD.exists(kPreviousLogPath) && !SD.remove(kPreviousLogPath)) {
-        setError("Could not remove old log");
+    const char* oldest = kArchiveLogPaths.back();
+    if (SD.exists(oldest) && !SD.remove(oldest)) {
+        setError("Could not remove oldest log");
         return false;
     }
-    if (!SD.rename(kLogPath, kPreviousLogPath)) {
-        setError("Could not rotate ble.log");
+    for (std::size_t index = kArchiveLogPaths.size() - 1; index > 0; --index) {
+        const char* source = kArchiveLogPaths[index - 1];
+        const char* destination = kArchiveLogPaths[index];
+        if (SD.exists(source) && !SD.rename(source, destination)) {
+            setError("Could not shift system log");
+            return false;
+        }
+    }
+    if (!SD.rename(kLogPath, kArchiveLogPaths.front())) {
+        setError("Could not rotate system.log");
         return false;
     }
     return true;

@@ -68,11 +68,19 @@ void formatElapsed(uint32_t elapsedMs, char* output, std::size_t capacity) {
 }  // namespace
 
 void MediaApp::onEnter(SystemContext& context) {
+    playbackLogValid_ = false;
     if (model_.enter() == MediaAppEffect::Scan) scan(context, true);
 }
 
 void MediaApp::onExit(SystemContext& context) {
-    if (context.media != nullptr) context.media->stop();
+    if (context.media != nullptr) {
+        const bool hadCurrent = context.media->snapshot(context.uptimeMs).hasCurrent;
+        context.media->stop();
+        if (hadCurrent && context.diagnostics != nullptr) {
+            context.diagnostics->log("MEDIA playback released on exit");
+        }
+    }
+    playbackLogValid_ = false;
 }
 
 void MediaApp::onInput(const InputEvent& event, SystemContext& context) {
@@ -97,10 +105,30 @@ void MediaApp::onInput(const InputEvent& event, SystemContext& context) {
             if (context.media != nullptr) context.media->moveSelection(1);
             return;
         case MediaAppEffect::OpenSelectedDirectory:
-            if (context.media != nullptr) context.media->enterSelectedDirectory();
+            if (context.media != nullptr) {
+                const bool opened = context.media->enterSelectedDirectory();
+                if (context.diagnostics != nullptr) {
+                    const MediaSnapshot snapshot = context.media->snapshot(context.uptimeMs);
+                    context.diagnostics->logf(
+                        "MEDIA folder enter: ok=%d depth=%u entries=%u truncated=%d",
+                        opened ? 1 : 0, static_cast<unsigned>(snapshot.directoryDepth),
+                        static_cast<unsigned>(snapshot.entryCount),
+                        snapshot.truncated ? 1 : 0);
+                }
+            }
             return;
         case MediaAppEffect::GoParentDirectory:
-            if (context.media != nullptr) context.media->goParentDirectory();
+            if (context.media != nullptr) {
+                const bool opened = context.media->goParentDirectory();
+                if (context.diagnostics != nullptr) {
+                    const MediaSnapshot snapshot = context.media->snapshot(context.uptimeMs);
+                    context.diagnostics->logf(
+                        "MEDIA folder up: ok=%d depth=%u entries=%u truncated=%d",
+                        opened ? 1 : 0, static_cast<unsigned>(snapshot.directoryDepth),
+                        static_cast<unsigned>(snapshot.entryCount),
+                        snapshot.truncated ? 1 : 0);
+                }
+            }
             return;
         case MediaAppEffect::ToggleSelected:
             if (context.media != nullptr) context.media->toggleSelected(context.uptimeMs);
@@ -121,7 +149,9 @@ void MediaApp::onInput(const InputEvent& event, SystemContext& context) {
     }
 }
 
-void MediaApp::update(uint32_t, SystemContext&) {}
+void MediaApp::update(uint32_t, SystemContext& context) {
+    logPlaybackState(context);
+}
 
 void MediaApp::render(Display& display, const SystemContext& context) {
     drawStatusBar(display, makeStatusBarData("MEDIA", context));
@@ -223,12 +253,42 @@ void MediaApp::scan(SystemContext& context, bool resetToRoot) {
                                      : context.media->rescan(mounted);
     if (context.diagnostics != nullptr) {
         const MediaSnapshot snapshot = context.media->snapshot(context.uptimeMs);
-        context.diagnostics->logf("MEDIA folder scan: ok=%d entries=%u depth=%u truncated=%d",
+        context.diagnostics->logf("MEDIA scan: ok=%d root=%d entries=%u depth=%u truncated=%d",
                                   scanned ? 1 : 0,
+                                  resetToRoot ? 1 : 0,
                                   static_cast<unsigned>(snapshot.entryCount),
                                   static_cast<unsigned>(snapshot.directoryDepth),
                                   snapshot.truncated ? 1 : 0);
     }
+}
+
+void MediaApp::logPlaybackState(SystemContext& context) {
+    if (context.media == nullptr || context.diagnostics == nullptr) return;
+    const MediaSnapshot snapshot = context.media->snapshot(context.uptimeMs);
+    const uint8_t state = static_cast<uint8_t>(snapshot.state);
+    const bool changed = !playbackLogValid_ || state != loggedState_ ||
+                         snapshot.entryCount != loggedEntryCount_ ||
+                         snapshot.directoryDepth != loggedDirectoryDepth_ ||
+                         snapshot.hasCurrent != loggedHasCurrent_ ||
+                         (snapshot.hasCurrent && snapshot.currentIndex != loggedCurrentIndex_);
+    if (!changed) return;
+
+    context.diagnostics->logf(
+        "MEDIA state: %s depth=%u entries=%u current=%d",
+        mediaPlaybackStateLabel(snapshot.state),
+        static_cast<unsigned>(snapshot.directoryDepth),
+        static_cast<unsigned>(snapshot.entryCount),
+        snapshot.hasCurrent ? static_cast<int>(snapshot.currentIndex) : -1);
+    if (snapshot.state == MediaPlaybackState::Error && snapshot.detail[0] != '\0') {
+        context.diagnostics->logf("MEDIA error: %.38s", snapshot.detail.data());
+    }
+
+    playbackLogValid_ = true;
+    loggedState_ = state;
+    loggedEntryCount_ = snapshot.entryCount;
+    loggedDirectoryDepth_ = snapshot.directoryDepth;
+    loggedCurrentIndex_ = snapshot.currentIndex;
+    loggedHasCurrent_ = snapshot.hasCurrent;
 }
 
 }  // namespace pd

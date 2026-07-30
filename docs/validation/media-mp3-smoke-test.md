@@ -1,6 +1,6 @@
 # Pocket Deck MEDIA MP3 Hardware Smoke Test
 
-Target firmware: `0.7.0` on M5Stack Cardputer Adv.
+Target firmware: `0.7.1` on M5Stack Cardputer Adv.
 
 Use short disposable MP3 files under `/Music`. Do not record filenames in this
 checklist or diagnostics. Never format the TF card as part of this checklist.
