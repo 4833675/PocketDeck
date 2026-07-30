@@ -185,15 +185,19 @@ void LoRaService::handleRadioIrq() {
         return;
     }
 
-    prepareSharedSpi();
-    const int16_t clearStatus = radio_.clearIrqFlags(RADIOLIB_SX126X_IRQ_ALL);
-    if (clearStatus != RADIOLIB_ERR_NONE) {
-        recoverReceive(clearStatus, "irq-clear");
-        return;
+    const uint32_t capturedIrqMask = irqFlags & RADIOLIB_SX126X_IRQ_ALL;
+    if (capturedIrqMask != 0) {
+        prepareSharedSpi();
+        const int16_t clearStatus = radio_.clearIrqFlags(capturedIrqMask);
+        if (clearStatus != RADIOLIB_ERR_NONE) {
+            recoverReceive(clearStatus, "irq-clear");
+            return;
+        }
     }
 
+    // Keep the active operation running. Re-arming here would clear IRQs that
+    // may have arrived after the snapshot while their software edge is queued.
     logState("irq-stale", RADIOLIB_ERR_NONE);
-    if (state == LoRaRadioState::Listening) startReceive();
 }
 
 void LoRaService::finishTransmit() {
