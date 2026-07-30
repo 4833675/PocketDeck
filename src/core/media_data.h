@@ -6,22 +6,26 @@
 
 namespace pd {
 
-inline constexpr std::size_t kMediaTrackCapacity = 32;
+inline constexpr std::size_t kMediaTrackCapacity = 64;
 inline constexpr std::size_t kMediaPathCapacity = 128;
+inline constexpr uint8_t kMediaMaximumDirectoryDepth = 4;
 
 struct MediaTrack {
     std::array<char, kMediaPathCapacity> path{};
     uint32_t bytes = 0;
+    bool directory = false;
 };
 
 bool mediaPathIsMp3(const char* path);
 const char* mediaTrackName(const MediaTrack& track);
 uint8_t mediaProgressPercent(uint32_t position, uint32_t size);
+bool mediaParentPath(const char* path, char* output, std::size_t capacity);
 
 class MediaLibrary {
 public:
     void clear();
     bool add(const char* path, uint32_t bytes);
+    bool addDirectory(const char* path);
     void sort();
     bool empty() const { return size_ == 0; }
     std::size_t size() const { return size_; }
@@ -29,6 +33,7 @@ public:
     std::size_t selectedIndex() const { return selected_; }
     const MediaTrack& at(std::size_t index) const;
     const MediaTrack& selected() const { return at(selected_); }
+    bool hasPlayableTrack() const;
     void moveSelection(int direction);
     void select(std::size_t index);
 

@@ -11,6 +11,8 @@ enum class MediaAppEffect : uint8_t {
     Scan,
     SelectPrevious,
     SelectNext,
+    OpenSelectedDirectory,
+    GoParentDirectory,
     ToggleSelected,
     PlayPrevious,
     PlayNext,
@@ -23,11 +25,18 @@ struct MediaAppResult {
     int8_t volumeDelta = 0;
 };
 
+struct MediaAppInputState {
+    bool hasEntries = false;
+    bool hasPlayableTrack = false;
+    bool selectedDirectory = false;
+    bool atRootDirectory = true;
+};
+
 class MediaAppModel {
 public:
     MediaAppEffect enter() const { return MediaAppEffect::Scan; }
     MediaAppEffect exit() const { return MediaAppEffect::StopAndGoHome; }
-    MediaAppResult handle(const InputEvent& event, bool hasTracks) const;
+    MediaAppResult handle(const InputEvent& event, const MediaAppInputState& state) const;
 };
 
 }  // namespace pd

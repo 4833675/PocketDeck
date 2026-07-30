@@ -8,23 +8,25 @@ This is the current handoff for the Pocket Deck repository. Read it with
 ## Current state
 
 - Repository: `https://github.com/4833675/PocketDeck`, branch `main`.
-- Current integration is `v0.6.0`: multi-profile Wi-Fi, Pocket SSH Terminal,
-  four-page GPS, raw LoRa P2P, and foreground TF-card MP3 playback are included
-  with the existing shell, BLE keyboard, weather, settings, and diagnostics.
+- Current integration is `v0.7.0`: multi-profile Wi-Fi, Pocket SSH Terminal,
+  four-page GPS, raw LoRa P2P, and a hierarchical Chinese-capable TF-card MP3
+  player are included with the shell, BLE keyboard, weather, and diagnostics.
 - The previous `v0.5.0` image was flashed without clearing NVS. Real-device validation
   reached `CONNECTING -> AUTHENTICATING -> OPENING SHELL -> CONNECTED` against a
   public-key-only server; host creation also survived repeated uploads/restarts.
   Terminal typing, controls, scrollback, and reconnect scenarios remain pending.
 - Integrated MEDIA/LoRa/GPS automated validation: `scripts/test-native.sh`
-  passed 876 checks; a clean build followed by `pio run -e cardputer-adv` with
-  ESP8266Audio 2.2.0 and RadioLib 7.7.1 used 86,000 / 327,680 bytes RAM (26.2%)
-  and 1,811,289 / 3,145,728 bytes flash (57.6%). Only the pre-existing
+  passed 920 checks; `pio run -e cardputer-adv` with ESP8266Audio 2.2.0 and
+  RadioLib 7.7.1 used 90,608 / 327,680 bytes RAM (27.7%) and 2,076,665 /
+  3,145,728 bytes flash (66.0%). Only the pre-existing
   LibSSH-ESP32 compiler warnings remain.
 - No LoRa Cap, antenna, RF, or two-endpoint hardware claim has been made.
 - The `v0.6.0` MEDIA image was uploaded without erasing NVS on 2026-07-30; the
   USB console answered `HELP` after restart. MEDIA and LORA were not opened, so
   the upload proves normal boot/main-loop responsiveness only, not MP3/audio,
   Cap, or RF behavior.
+- The `v0.7.0` image is built but not flashed. Its four-level browser, Chinese
+  font, 128 kbps playback tuning, and regressions still require device testing.
 - Real-device logs confirmed BLE reconnect, successful Wi-Fi scans, and a manual
   Tab scan (`raw=29`, strongest 8 displayed). The one migrated saved SSID was
   not visible at the test location (`candidates=0`), which is expected.
@@ -48,8 +50,8 @@ Current apps and services:
 - Four-page GPS dashboard for the optional Cap LoRa-1262, including a motion-only
   page with speed/course validity and stale-data handling.
 - Raw LoRa P2P text terminal for the Cap SX1262 and a matching RadioLib peer.
-- Foreground MEDIA player for up to 32 MP3 files in `/Music`, using
-  ESP8266Audio 2.2.0 and the M5 speaker/AUX output.
+- Foreground MEDIA player with four folder levels, 64 entries per current
+  folder, Chinese filenames, ESP8266Audio 2.2.0, and speaker/AUX output.
 - Wi-Fi manager with eight profiles, NTP clock, and GPS-local Open-Meteo weather.
 - Pocket SSH Terminal with six NVS host entries, one PTY shell, public-key auth,
   40×13 ANSI display, 64-line scrollback, reconnect, and quick commands.
@@ -122,8 +124,12 @@ Current apps and services:
   Missing Cap/error must not block GPS, TF, BLE, Wi-Fi, weather, or SSH. RX/TX
   payloads are bounded to 120 printable-ASCII bytes; RX is sanitized and
   oversize input drops. Keep six in-RAM records only.
-- MEDIA scans only `/Music`, keeps 32 fixed-size records, never remounts TF, and
-  stops/releases MP3 objects on app exit. Never log filenames or audio content.
+- MEDIA starts at `/Music`, enters folders one level at a time to depth four,
+  keeps 64 fixed-size entries from only the current folder, never remounts TF,
+  and stops/releases playback before folder changes or app exit. Chinese names
+  use built-in `efontCN_14`; never log filenames or audio content.
+- MEDIA uses M5's 1,536-sample speaker buffers and renders at 10 Hz to reduce
+  underruns. Recommend 128 kbps / 44.1 kHz; hardware confirmation is pending.
 - TF logging closes each append so unexpected power loss does not strand a long
   buffered session. Logs rotate at 512 KB.
 - The repository never contains the SSH private key. PlatformIO reads an
@@ -158,8 +164,9 @@ Serial log commands: `HELP`, `LOG STATUS`, `LOG DUMP`, `LOG DUMP ALL`, and
 
 ## Near-term validation
 
-1. Run `docs/validation/media-mp3-smoke-test.md` with disposable MP3 files and
-   verify speaker/AUX, pause/skip/auto-next, TF logs, memory, and regressions.
+1. Flash `v0.7.0`, then run `docs/validation/media-mp3-smoke-test.md`; verify
+   Chinese hierarchy navigation, 128 kbps continuity, speaker/AUX,
+   pause/skip/auto-next, TF logs, memory, and regressions.
 2. Run `docs/validation/lora-text-terminal-smoke-test.md` with antenna attached
    and a matching second SX1262/RadioLib endpoint; all RF, shared-SPI, and
    regression rows remain pending until observed.

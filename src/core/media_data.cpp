@@ -23,6 +23,7 @@ int compareAsciiCaseInsensitive(const char* lhs, const char* rhs) {
 }
 
 int compareTracks(const MediaTrack& lhs, const MediaTrack& rhs) {
+    if (lhs.directory != rhs.directory) return lhs.directory ? -1 : 1;
     const int byName = compareAsciiCaseInsensitive(mediaTrackName(lhs), mediaTrackName(rhs));
     if (byName != 0) return byName;
     return std::strcmp(lhs.path.data(), rhs.path.data());
@@ -52,6 +53,22 @@ uint8_t mediaProgressPercent(uint32_t position, uint32_t size) {
     return static_cast<uint8_t>((static_cast<uint64_t>(position) * 100u) / size);
 }
 
+bool mediaParentPath(const char* path, char* output, std::size_t capacity) {
+    if (path == nullptr || output == nullptr || capacity == 0 || path[0] != '/') return false;
+    const std::size_t length = std::strlen(path);
+    if (length <= 1 || length >= capacity) return false;
+    // Callers may intentionally reuse the same buffer while walking upward.
+    std::memmove(output, path, length + 1);
+    char* slash = std::strrchr(output, '/');
+    if (slash == nullptr) return false;
+    if (slash == output) {
+        output[1] = '\0';
+    } else {
+        *slash = '\0';
+    }
+    return true;
+}
+
 void MediaLibrary::clear() {
     for (auto& track : tracks_) track = MediaTrack{};
     size_ = 0;
@@ -67,6 +84,28 @@ bool MediaLibrary::add(const char* path, uint32_t bytes) {
     MediaTrack candidate;
     std::memcpy(candidate.path.data(), path, length + 1);
     candidate.bytes = bytes;
+    candidate.directory = false;
+    if (size_ >= tracks_.size()) {
+        truncated_ = true;
+        std::size_t largest = 0;
+        for (std::size_t index = 1; index < size_; ++index) {
+            if (compareTracks(tracks_[largest], tracks_[index]) < 0) largest = index;
+        }
+        if (compareTracks(candidate, tracks_[largest]) >= 0) return false;
+        tracks_[largest] = candidate;
+        return true;
+    }
+    tracks_[size_++] = candidate;
+    return true;
+}
+
+bool MediaLibrary::addDirectory(const char* path) {
+    if (path == nullptr) return false;
+    const std::size_t length = std::strlen(path);
+    if (length == 0 || length >= kMediaPathCapacity) return false;
+    MediaTrack candidate;
+    std::memcpy(candidate.path.data(), path, length + 1);
+    candidate.directory = true;
     if (size_ >= tracks_.size()) {
         truncated_ = true;
         std::size_t largest = 0;
@@ -97,6 +136,13 @@ void MediaLibrary::sort() {
 const MediaTrack& MediaLibrary::at(std::size_t index) const {
     static const MediaTrack emptyTrack{};
     return index < size_ ? tracks_[index] : emptyTrack;
+}
+
+bool MediaLibrary::hasPlayableTrack() const {
+    for (std::size_t index = 0; index < size_; ++index) {
+        if (!tracks_[index].directory) return true;
+    }
+    return false;
 }
 
 void MediaLibrary::moveSelection(int direction) {

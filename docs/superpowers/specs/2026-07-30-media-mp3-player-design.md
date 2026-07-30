@@ -2,7 +2,7 @@
 
 **Date:** 2026-07-30
 
-**Status:** Approved for implementation
+**Status:** Approved and extended for firmware 0.7.0
 
 ## Goal
 
@@ -13,9 +13,11 @@ SSH, diagnostics, and TF logging services on a device with no PSRAM.
 
 ## Scope
 
-- Scan the non-recursive `/Music` directory for `.mp3` files, case-insensitively.
-- Keep at most 32 tracks in a fixed-capacity, case-insensitively sorted library.
-- Show a compact scrollable library with the selected and currently loaded track.
+- Browse `/Music` as a real folder hierarchy up to four levels deep.
+- Keep at most 64 entries from the current folder in a fixed-capacity,
+  case-insensitively sorted list, with folders before tracks.
+- Show four compact Chinese-capable rows using the built-in M5GFX
+  `fonts::efontCN_14` font; no LittleFS font asset is required.
 - Play through `M5Cardputer.Speaker` using the same ESP8266Audio adapter pattern
   as M5Stack's official M5Unified MP3 example. Version 2.2.0 is pinned because
   later releases require the newer ESP32 I2S API absent from this toolchain.
@@ -26,27 +28,29 @@ SSH, diagnostics, and TF logging services on a device with no PSRAM.
 - Stop playback, close the file, and release decoder memory when MEDIA exits.
 
 The first version excludes ID3 metadata, cover art, waveform/FFT graphics,
-seeking, playlists, recursive folders, shuffle/repeat modes, background
+seeking, playlists, folders deeper than four levels, shuffle/repeat modes, background
 playback, network streams, WAV/AAC/FLAC, GIF, MJPEG, and other video formats.
 
 ## Interaction
 
 - `Fn+Up` / `Fn+Down`: move the library selection.
-- `Enter`: start the selected track; if it is already loaded, toggle pause/resume.
+- `Enter`: enter the selected folder, start the selected track, or toggle the
+  loaded track's pause state.
 - `Fn+Left` / `Fn+Right`: load and play the previous/next track with wraparound.
 - `-` / `=`: decrease/increase volume by 5 percentage points and persist it.
-- `Backspace` or G0 tap: stop playback and return Home.
+- `Backspace`: stop playback and return to the parent folder; at `/Music`, go Home.
+- G0 tap: stop playback and return Home from any folder.
 
-Opening MEDIA scans the card. If playback is already stopped, rescanning is
-allowed with `Tab`; the scan never runs while a decoder owns an open track.
+Opening MEDIA starts at `/Music`. If playback is stopped, `Tab` rescans the
+current folder; the scan never runs while a decoder owns an open track.
 
 ## Architecture
 
 ### Portable core
 
-`src/core/media_data.*` owns fixed-size track records, filtering, sorting,
-selection, wraparound, and display-safe filename extraction. It has no Arduino
-dependency and is covered by native tests.
+`src/core/media_data.*` owns fixed-size folder/track records, filtering,
+folder-first sorting, parent paths, selection, wraparound, and display-safe
+filename extraction. It has no Arduino dependency and is covered by native tests.
 
 `src/apps/media/media_app_model.*` translates input into explicit effects such
 as select, play/toggle, skip, rescan, volume adjustment, and Home. It contains no
@@ -70,8 +74,8 @@ content are never written to diagnostics.
 `SystemContext`, updates the decoder from the main task, and routes requested
 volume changes through `Board`, `SystemSettings`, and `SettingsStore`.
 
-MEDIA is added to the launcher between LORA and WEATHER. The firmware version
-becomes `0.6.0`.
+MEDIA is added to the launcher between LORA and WEATHER. Hierarchical browsing,
+Chinese filenames, and the official M5 speaker buffer size ship in `0.7.0`.
 
 ## Shared-resource rules
 
@@ -91,8 +95,8 @@ becomes `0.6.0`.
 
 - TF unavailable: `NO TF CARD`, with a pointer to Settings > System > TF logs.
 - `/Music` absent: create it when possible and show `COPY MP3 TO /Music`.
-- No MP3 files: `NO MP3 FILES`.
-- Library limit reached: play the first 32 sorted tracks and show `32+`.
+- Empty folder: `NO MP3 FILES` with `EMPTY FOLDER` detail.
+- Per-folder limit reached: show the first 64 sorted entries and a `+` marker.
 - Open/decode failure: preserve the library, stop cleanly, and show a short
   filename-independent error.
 - Unexpected end or decoder failure: close resources; normal end advances,
@@ -100,9 +104,9 @@ becomes `0.6.0`.
 
 ## Validation
 
-Automated validation covers MP3 extension matching, deterministic sorting,
-capacity limits, selection wraparound, app effects, progress clamping, and
-elapsed-time pause behavior. Every code change must pass:
+Automated validation covers MP3 extension matching, directory-first sorting,
+parent paths, capacity limits, selection wraparound, folder navigation effects,
+progress clamping, and elapsed-time pause behavior. Every code change must pass:
 
 ```bash
 scripts/test-native.sh

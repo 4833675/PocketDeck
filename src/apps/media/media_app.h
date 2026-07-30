@@ -17,7 +17,7 @@ public:
     void render(Display& display, const SystemContext& context) override;
 
 private:
-    void scan(SystemContext& context);
+    void scan(SystemContext& context, bool resetToRoot);
 
     MediaAppModel model_{};
 };

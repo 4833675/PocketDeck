@@ -46,6 +46,9 @@ pio device monitor -e cardputer-adv
 - MEDIA is the one intentional exception: it may keep one read-only MP3 file
   open only while foreground playback is active. Audio/SD work stays on the main
   task and the file must close before mount, format, or app exit.
+- MEDIA browses at most four folder levels and stores at most 64 entries from
+  the current folder. Folder changes close playback first; Chinese names use
+  the built-in M5GFX font and must not introduce a LittleFS dependency.
 - Native USB re-enumerates on reset; a monitor attached afterward may miss early
   serial output. Persistent TF logs are the reliable boot-history source.
 

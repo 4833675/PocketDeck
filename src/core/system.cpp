@@ -165,7 +165,10 @@ void System::update() {
     const AppId requested = context_.takeRequestedApp();
     if (requested != AppId::None) openApp(requested);
 
-    if (nowMs - lastRenderMs_ >= 33) render();
+    const uint32_t renderIntervalMs = current_ != nullptr && current_->id() == AppId::Media
+                                          ? 100u
+                                          : 33u;
+    if (nowMs - lastRenderMs_ >= renderIntervalMs) render();
     delay(1);
 }
 

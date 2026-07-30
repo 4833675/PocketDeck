@@ -49,33 +49,23 @@ public:
     void silence() { M5Cardputer.Speaker.stop(kSpeakerChannel); }
 
 private:
-    // Three short buffers preserve the official M5Unified adapter's queueing
-    // behavior while using half its persistent playback allocation.
-    static constexpr std::size_t kBufferSamples = 768;
+    // Match M5Unified's official ESP8266Audio adapter. The former half-sized
+    // buffers could underrun while Pocket Deck rendered or serviced radios.
+    static constexpr std::size_t kBufferSamples = 1536;
     std::array<std::array<int16_t, kBufferSamples>, 3> buffers_{};
     std::size_t bufferSlot_ = 0;
     std::size_t bufferIndex_ = 0;
 };
 
-bool makeEntryPath(File& entry, char* output, std::size_t capacity) {
+bool makeEntryPath(File& entry, const char* parent, char* output, std::size_t capacity) {
     if (output == nullptr || capacity == 0) return false;
     output[0] = '\0';
-    const char* path = entry.path();
-    if (path != nullptr && path[0] == '/') {
-        const std::size_t length = std::strlen(path);
-        if (length >= capacity) return false;
-        std::memcpy(output, path, length + 1);
-        return true;
-    }
     const char* name = entry.name();
     if (name == nullptr || name[0] == '\0') return false;
-    if (name[0] == '/') {
-        const std::size_t length = std::strlen(name);
-        if (length >= capacity) return false;
-        std::memcpy(output, name, length + 1);
-        return true;
-    }
-    const int written = std::snprintf(output, capacity, "%s/%s", kMusicDirectory, name);
+    const char* leaf = std::strrchr(name, '/');
+    leaf = leaf == nullptr ? name : leaf + 1;
+    if (leaf[0] == '\0' || leaf[0] == '.' || std::strcmp(leaf, "..") == 0) return false;
+    const int written = std::snprintf(output, capacity, "%s/%s", parent, leaf);
     return written > 0 && static_cast<std::size_t>(written) < capacity;
 }
 
@@ -96,15 +86,14 @@ MediaService::~MediaService() {
 }
 
 bool MediaService::scan(bool storageMounted) {
-    if (state_ == MediaPlaybackState::Playing || state_ == MediaPlaybackState::Paused) {
-        return false;
-    }
-    releasePlayback(true);
-    library_.clear();
-    hasCurrent_ = false;
-    elapsed_.stop();
-
     if (!storageMounted) {
+        releasePlayback(true);
+        library_.clear();
+        directoryPath_.fill('\0');
+        std::strncpy(directoryPath_.data(), kMusicDirectory, directoryPath_.size() - 1);
+        directoryDepth_ = 0;
+        hasCurrent_ = false;
+        elapsed_.stop();
         setState(MediaPlaybackState::NoCard, "MOUNT TF IN SETTINGS");
         return false;
     }
@@ -112,21 +101,53 @@ bool MediaService::scan(bool storageMounted) {
         setState(MediaPlaybackState::Error, "COULD NOT CREATE /Music");
         return false;
     }
+    return loadDirectory(kMusicDirectory, 0);
+}
 
-    File directory = SD.open(kMusicDirectory, FILE_READ);
+bool MediaService::rescan(bool storageMounted) {
+    if (state_ == MediaPlaybackState::Playing || state_ == MediaPlaybackState::Paused) {
+        return false;
+    }
+    if (!storageMounted) {
+        setState(MediaPlaybackState::NoCard, "MOUNT TF IN SETTINGS");
+        return false;
+    }
+    const char* path = directoryPath_[0] != '\0' ? directoryPath_.data() : kMusicDirectory;
+    return loadDirectory(path, directoryDepth_);
+}
+
+bool MediaService::loadDirectory(const char* path, uint8_t depth) {
+    if (path == nullptr || path[0] != '/' || depth > kMediaMaximumDirectoryDepth) return false;
+    std::array<char, kMediaPathCapacity> requested{};
+    const std::size_t pathLength = std::strlen(path);
+    if (pathLength == 0 || pathLength >= requested.size()) return false;
+    std::memcpy(requested.data(), path, pathLength + 1);
+
+    releasePlayback(true);
+    library_.clear();
+    hasCurrent_ = false;
+    elapsed_.stop();
+    directoryPath_ = requested;
+    directoryDepth_ = depth;
+
+    File directory = SD.open(directoryPath_.data(), FILE_READ);
     if (!directory || !directory.isDirectory()) {
         directory.close();
-        setState(MediaPlaybackState::Error, "COULD NOT OPEN /Music");
+        setState(MediaPlaybackState::Error, "COULD NOT OPEN FOLDER");
         return false;
     }
 
     while (true) {
         File entry = directory.openNextFile();
         if (!entry) break;
-        if (!entry.isDirectory()) {
-            std::array<char, kMediaPathCapacity> path{};
-            if (makeEntryPath(entry, path.data(), path.size()) && mediaPathIsMp3(path.data())) {
-                library_.add(path.data(), static_cast<uint32_t>(entry.size()));
+        std::array<char, kMediaPathCapacity> childPath{};
+        if (makeEntryPath(entry, directoryPath_.data(), childPath.data(), childPath.size())) {
+            if (entry.isDirectory()) {
+                if (directoryDepth_ < kMediaMaximumDirectoryDepth) {
+                    library_.addDirectory(childPath.data());
+                }
+            } else if (mediaPathIsMp3(childPath.data())) {
+                library_.add(childPath.data(), static_cast<uint32_t>(entry.size()));
             }
         }
         entry.close();
@@ -135,10 +156,11 @@ bool MediaService::scan(bool storageMounted) {
     library_.sort();
 
     if (library_.empty()) {
-        setState(MediaPlaybackState::Empty, "COPY MP3 TO /Music");
+        setState(MediaPlaybackState::Empty,
+                 directoryDepth_ == 0 ? "COPY MP3 TO /Music" : "EMPTY FOLDER");
         return true;
     }
-    setState(MediaPlaybackState::Ready, library_.truncated() ? "SHOWING FIRST 32" : nullptr);
+    setState(MediaPlaybackState::Ready, library_.truncated() ? "SHOWING FIRST 64" : nullptr);
     return true;
 }
 
@@ -162,7 +184,11 @@ void MediaService::update(uint32_t nowMs) {
         setState(MediaPlaybackState::Empty, "COPY MP3 TO /Music");
         return;
     }
-    const std::size_t next = (finishedIndex + 1) % library_.size();
+    std::size_t next = 0;
+    if (!findRelativeTrack(finishedIndex, 1, next)) {
+        setState(MediaPlaybackState::Ready);
+        return;
+    }
     library_.select(next);
     if (!startTrack(next, nowMs)) setState(MediaPlaybackState::Error, "NEXT TRACK FAILED");
 }
@@ -173,10 +199,11 @@ void MediaService::stop() {
     hasCurrent_ = false;
     if (library_.empty()) {
         if (state_ != MediaPlaybackState::NoCard) {
-            setState(MediaPlaybackState::Empty, "COPY MP3 TO /Music");
+            setState(MediaPlaybackState::Empty,
+                     directoryDepth_ == 0 ? "COPY MP3 TO /Music" : "EMPTY FOLDER");
         }
     } else {
-        setState(MediaPlaybackState::Ready, library_.truncated() ? "SHOWING FIRST 32" : nullptr);
+        setState(MediaPlaybackState::Ready, library_.truncated() ? "SHOWING FIRST 64" : nullptr);
     }
 }
 
@@ -184,8 +211,23 @@ void MediaService::moveSelection(int direction) {
     library_.moveSelection(direction);
 }
 
+bool MediaService::enterSelectedDirectory() {
+    if (library_.empty() || !library_.selected().directory ||
+        directoryDepth_ >= kMediaMaximumDirectoryDepth) {
+        return false;
+    }
+    return loadDirectory(library_.selected().path.data(), directoryDepth_ + 1);
+}
+
+bool MediaService::goParentDirectory() {
+    if (directoryDepth_ == 0) return false;
+    std::array<char, kMediaPathCapacity> parent{};
+    if (!mediaParentPath(directoryPath_.data(), parent.data(), parent.size())) return false;
+    return loadDirectory(parent.data(), directoryDepth_ - 1);
+}
+
 bool MediaService::toggleSelected(uint32_t nowMs) {
-    if (library_.empty()) return false;
+    if (library_.empty() || library_.selected().directory) return false;
     const std::size_t selected = library_.selectedIndex();
     if (hasCurrent_ && selected == currentIndex_) {
         if (state_ == MediaPlaybackState::Playing) {
@@ -201,22 +243,39 @@ bool MediaService::toggleSelected(uint32_t nowMs) {
 }
 
 bool MediaService::playRelative(int direction, uint32_t nowMs) {
-    if (library_.empty() || direction == 0) return false;
+    if (library_.empty() || !library_.hasPlayableTrack() || direction == 0) return false;
     const std::size_t base = hasCurrent_ ? currentIndex_ : library_.selectedIndex();
-    const std::size_t next = direction < 0 ? (base + library_.size() - 1) % library_.size()
-                                           : (base + 1) % library_.size();
+    std::size_t next = 0;
+    if (!findRelativeTrack(base, direction, next)) return false;
     library_.select(next);
     return startTrack(next, nowMs);
+}
+
+bool MediaService::findRelativeTrack(std::size_t base, int direction,
+                                     std::size_t& result) const {
+    if (library_.empty() || direction == 0) return false;
+    std::size_t index = base < library_.size() ? base : 0;
+    for (std::size_t step = 0; step < library_.size(); ++step) {
+        index = direction < 0 ? (index + library_.size() - 1) % library_.size()
+                              : (index + 1) % library_.size();
+        if (!library_.at(index).directory) {
+            result = index;
+            return true;
+        }
+    }
+    return false;
 }
 
 MediaSnapshot MediaService::snapshot(uint32_t nowMs) const {
     MediaSnapshot result;
     result.state = state_;
-    result.trackCount = static_cast<uint8_t>(library_.size());
+    result.entryCount = static_cast<uint8_t>(library_.size());
     result.selectedIndex = static_cast<uint8_t>(library_.selectedIndex());
     result.currentIndex = static_cast<uint8_t>(currentIndex_);
     result.hasCurrent = hasCurrent_;
+    result.selectedDirectory = !library_.empty() && library_.selected().directory;
     result.truncated = library_.truncated();
+    result.directoryDepth = directoryDepth_;
     result.elapsedMs = elapsed_.elapsed(nowMs);
     if (source_ != nullptr) {
         result.progressPercent = mediaProgressPercent(source_->getPos(), source_->getSize());
@@ -226,7 +285,7 @@ MediaSnapshot MediaService::snapshot(uint32_t nowMs) const {
 }
 
 bool MediaService::startTrack(std::size_t index, uint32_t nowMs) {
-    if (index >= library_.size()) return false;
+    if (index >= library_.size() || library_.at(index).directory) return false;
     releasePlayback(true);
     elapsed_.stop();
     hasCurrent_ = false;

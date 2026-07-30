@@ -9,7 +9,7 @@ diagnostics.
 It is a from-scratch project, not a Claude Desktop Buddy fork, and it does not
 support the original Cardputer model.
 
-Current firmware: **0.6.0**
+Current firmware: **0.7.0**
 
 ## Features
 
@@ -22,7 +22,8 @@ Current firmware: **0.6.0**
   ANSI colors, local scrollback, reconnect, and quick commands.
 - Four-page GNSS dashboard for the optional M5Stack Cap LoRa-1262.
 - Raw LoRa P2P text terminal for a matching SX1262/RadioLib peer.
-- Foreground MP3 player for up to 32 tracks under `/Music` on a TF card.
+- Foreground MP3 player with four-level folder browsing and Chinese filenames
+  under `/Music` on a TF card.
 - Versioned Preferences/NVS settings and confirmed destructive actions.
 - On-device diagnostics plus optional rotating logs on a TF/microSD card.
 
@@ -291,26 +292,30 @@ regression evidence. A successful build does not prove radio operation.
 ## MEDIA MP3 player
 
 MEDIA plays MP3 files from the Cardputer Adv TF card through the built-in
-speaker or 3.5 mm audio output. Create `/Music` in the card root, copy MP3 files
-into that directory, insert the card, and restart Pocket Deck. The scan is
-non-recursive, accepts `.mp3` case-insensitively, sorts filenames, and keeps at
-most 32 tracks in RAM. Short ASCII filenames render most reliably with the
-built-in display font.
+speaker or 3.5 mm audio output. Create `/Music` in the card root, then organize
+tracks in folders such as `/Music/artist/album/song.mp3`. MEDIA browses up to
+four folder levels, accepts `.mp3` case-insensitively, lists folders before
+tracks, and keeps at most 64 entries from the current folder in RAM. Chinese
+folder and track names use M5GFX's built-in `efontCN_14`; no font filesystem
+asset is required.
 
 | Control | MEDIA action |
 |---|---|
 | Fn + Up / Down | Select previous / next library row |
-| Enter | Play the selected track or pause/resume the loaded track |
-| Fn + Left / Right | Play previous / next track |
+| Enter | Open a folder, play a track, or pause/resume the loaded track |
+| Backspace | Return to the parent folder; from `/Music`, return Home |
+| Fn + Left / Right | Play previous / next track in the current folder |
 | `-` / `=` | Volume −5 / +5 and save the new level |
 | Tab | Rescan while stopped |
-| Backspace or G0 | Stop, release the decoder, and return Home |
+| G0 | Stop, release the decoder, and return Home from any folder |
 
 The screen shows active-play elapsed time and byte-position progress; variable
 bitrate files can therefore make the percentage advance unevenly. End of file
 automatically advances to the next track. Playback is foreground-only: leaving
-MEDIA closes the MP3 and stops audio. The first version has no ID3 metadata,
-cover art, seeking, playlists, shuffle, background playback, or other codecs.
+MEDIA closes the MP3 and stops audio. Folder changes also stop playback before
+opening a new SD directory. The first version has no ID3 display, cover art,
+seeking, playlists, shuffle, background playback, or other codecs. For this
+device workload, 128 kbps / 44.1 kHz MP3 is the recommended source format.
 
 MEDIA reuses the already-mounted TF card instead of remounting it. TF logs and
 the SX1262 share the existing SPI bus and remain serialized by the main system
@@ -365,8 +370,8 @@ coordinates are deliberately excluded from diagnostics.
   attached before retrying. Do not transmit without an antenna.
 - **MEDIA says `NO TF CARD`:** mount the card under Settings > System > TF card
   logs, then return to MEDIA and press Tab.
-- **MEDIA says `NO MP3 FILES`:** copy MP3 files directly into `/Music`; nested
-  folders and other audio formats are ignored.
+- **MEDIA says `NO MP3 FILES`:** copy MP3 files into `/Music` or a folder no
+  deeper than four levels; other audio formats are ignored.
 - **MEDIA says `OUT OF MEMORY`:** restart Pocket Deck before playing, especially
   after opening SSH; the device has no PSRAM.
 - **Weather will not update:** verify a fresh GPS fix, Wi-Fi/IP, and NTP, then

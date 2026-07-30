@@ -1449,16 +1449,20 @@ TEST_CASE(lora_app_does_not_request_duplicate_send_while_transmitting) {
 TEST_CASE(media_library_filters_sorts_and_exposes_display_names) {
     MediaLibrary library;
     CHECK(!library.add("/Music/not-a-track.wav", 10));
+    CHECK(library.addDirectory("/Music/周杰伦"));
     CHECK(library.add("/Music/zebra.MP3", 300));
     CHECK(library.add("/Music/Alpha.mp3", 100));
     CHECK(library.add("/Music/beta.mP3", 200));
     library.sort();
 
-    CHECK_EQ(library.size(), 3u);
-    CHECK_STR_EQ(mediaTrackName(library.at(0)), "Alpha.mp3");
-    CHECK_STR_EQ(mediaTrackName(library.at(1)), "beta.mP3");
-    CHECK_STR_EQ(mediaTrackName(library.at(2)), "zebra.MP3");
-    CHECK_EQ(library.at(1).bytes, 200u);
+    CHECK_EQ(library.size(), 4u);
+    CHECK(library.at(0).directory);
+    CHECK_STR_EQ(mediaTrackName(library.at(0)), "周杰伦");
+    CHECK_STR_EQ(mediaTrackName(library.at(1)), "Alpha.mp3");
+    CHECK_STR_EQ(mediaTrackName(library.at(2)), "beta.mP3");
+    CHECK_STR_EQ(mediaTrackName(library.at(3)), "zebra.MP3");
+    CHECK_EQ(library.at(2).bytes, 200u);
+    CHECK(library.hasPlayableTrack());
     CHECK(mediaPathIsMp3("song.mp3"));
     CHECK(!mediaPathIsMp3(".mp3"));
     CHECK(!mediaPathIsMp3("song.mp30"));
@@ -1477,7 +1481,7 @@ TEST_CASE(media_library_is_bounded_and_selection_wraps) {
     CHECK(library.add("/Music/00a.mp3", 99));
     library.sort();
     CHECK_STR_EQ(mediaTrackName(library.at(1)), "00a.mp3");
-    CHECK_STR_EQ(mediaTrackName(library.at(kMediaTrackCapacity - 1)), "30.mp3");
+    CHECK_STR_EQ(mediaTrackName(library.at(kMediaTrackCapacity - 1)), "62.mp3");
     library.moveSelection(-1);
     CHECK_EQ(library.selectedIndex(), kMediaTrackCapacity - 1);
     library.moveSelection(1);
@@ -1486,6 +1490,13 @@ TEST_CASE(media_library_is_bounded_and_selection_wraps) {
     CHECK_EQ(library.selectedIndex(), 4u);
     library.select(kMediaTrackCapacity);
     CHECK_EQ(library.selectedIndex(), 4u);
+
+    char parent[kMediaPathCapacity]{};
+    CHECK(mediaParentPath("/Music/周杰伦/七里香", parent, sizeof(parent)));
+    CHECK_STR_EQ(parent, "/Music/周杰伦");
+    CHECK(mediaParentPath(parent, parent, sizeof(parent)));
+    CHECK_STR_EQ(parent, "/Music");
+    CHECK(!mediaParentPath("/", parent, sizeof(parent)));
 }
 
 TEST_CASE(media_progress_and_elapsed_clock_are_bounded_and_wrap_safe) {
@@ -1506,23 +1517,33 @@ TEST_CASE(media_progress_and_elapsed_clock_are_bounded_and_wrap_safe) {
 
 TEST_CASE(media_app_maps_library_playback_volume_rescan_and_home) {
     MediaAppModel model;
+    MediaAppInputState fileState{true, true, false, false};
+    MediaAppInputState directoryState{true, false, true, false};
+    MediaAppInputState rootState{true, true, false, true};
+    MediaAppInputState emptyState{};
     CHECK_EQ(model.enter(), MediaAppEffect::Scan);
-    CHECK_EQ(model.handle({InputAction::Up, '\0'}, true).effect,
+    CHECK_EQ(model.handle({InputAction::Up, '\0'}, fileState).effect,
              MediaAppEffect::SelectPrevious);
-    CHECK_EQ(model.handle({InputAction::Down, '\0'}, true).effect,
+    CHECK_EQ(model.handle({InputAction::Down, '\0'}, fileState).effect,
              MediaAppEffect::SelectNext);
-    CHECK_EQ(model.handle({InputAction::Left, '\0'}, true).effect,
+    CHECK_EQ(model.handle({InputAction::Left, '\0'}, fileState).effect,
              MediaAppEffect::PlayPrevious);
-    CHECK_EQ(model.handle({InputAction::Right, '\0'}, true).effect,
+    CHECK_EQ(model.handle({InputAction::Right, '\0'}, fileState).effect,
              MediaAppEffect::PlayNext);
-    CHECK_EQ(model.handle({InputAction::Confirm, '\0'}, true).effect,
+    CHECK_EQ(model.handle({InputAction::Confirm, '\0'}, fileState).effect,
              MediaAppEffect::ToggleSelected);
-    CHECK_EQ(model.handle({InputAction::Tab, '\0'}, false).effect, MediaAppEffect::Scan);
-    CHECK_EQ(model.handle({InputAction::None, '-'}, false).volumeDelta, -5);
-    CHECK_EQ(model.handle({InputAction::None, '+'}, false).volumeDelta, 5);
-    CHECK_EQ(model.handle({InputAction::Erase, '\0'}, false).effect,
+    CHECK_EQ(model.handle({InputAction::Confirm, '\0'}, directoryState).effect,
+             MediaAppEffect::OpenSelectedDirectory);
+    CHECK_EQ(model.handle({InputAction::Erase, '\0'}, directoryState).effect,
+             MediaAppEffect::GoParentDirectory);
+    CHECK_EQ(model.handle({InputAction::Back, '\0'}, directoryState).effect,
+             MediaAppEffect::GoParentDirectory);
+    CHECK_EQ(model.handle({InputAction::Tab, '\0'}, emptyState).effect, MediaAppEffect::Scan);
+    CHECK_EQ(model.handle({InputAction::None, '-'}, emptyState).volumeDelta, -5);
+    CHECK_EQ(model.handle({InputAction::None, '+'}, emptyState).volumeDelta, 5);
+    CHECK_EQ(model.handle({InputAction::Erase, '\0'}, rootState).effect,
              MediaAppEffect::StopAndGoHome);
-    CHECK_EQ(model.handle({InputAction::Confirm, '\0'}, false).effect,
+    CHECK_EQ(model.handle({InputAction::Confirm, '\0'}, emptyState).effect,
              MediaAppEffect::None);
 }
 
