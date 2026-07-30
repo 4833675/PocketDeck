@@ -13,6 +13,7 @@
 #include "core/g0_gesture.h"
 #include "core/gps_data.h"
 #include "core/lora_data.h"
+#include "core/lora_tx_policy.h"
 #include "core/input_router.h"
 #include "core/mac_keymap.h"
 #include "core/serial_command.h"
@@ -779,6 +780,61 @@ TEST_CASE(lora_transmitting_draft_is_immutable_until_completion) {
     CHECK(model.draftEmpty());
 }
 
+TEST_CASE(lora_pending_tx_snapshots_same_frame_payload_and_locks_edits) {
+    LoRaTxPolicy policy;
+    LoRaData model;
+    model.beginListening();
+    CHECK(policy.appendDraft(model, 'O'));
+    CHECK(policy.appendDraft(model, 'K'));
+
+    CHECK(policy.capture(reinterpret_cast<const uint8_t*>(model.draft()),
+                         model.draftLength()));
+    CHECK(policy.active());
+    CHECK_EQ(policy.length(), 2u);
+    CHECK_EQ(policy.payload()[0], static_cast<uint8_t>('O'));
+    CHECK_EQ(policy.payload()[1], static_cast<uint8_t>('K'));
+    CHECK(!policy.appendDraft(model, '!'));
+    CHECK(!policy.eraseDraft(model));
+    policy.clearDraft(model);
+    CHECK_STR_EQ(model.draft(), "OK");
+    CHECK(!policy.capture(policy.payload(), policy.length()));
+
+    CHECK(model.beginTransmit());
+    CHECK(model.completeTransmit(0));
+    CHECK_STR_EQ(model.historyAt(0).text.data(), "OK");
+
+    policy.clear();
+    CHECK(!policy.active());
+    CHECK_EQ(policy.length(), 0u);
+    CHECK(policy.appendDraft(model, 'R'));
+}
+
+TEST_CASE(lora_tx_watchdog_deadline_is_inclusive_and_wrap_safe) {
+    LoRaTxPolicy policy;
+    const uint8_t payload = 'T';
+    CHECK(policy.capture(&payload, 1));
+
+    constexpr uint32_t startMs = 5000;
+    constexpr uint32_t timeOnAirUs = 1501;
+    constexpr uint32_t durationMs = 2 + LoRaTxPolicy::kWatchdogSafetyMarginMs;
+    policy.armWatchdog(startMs, timeOnAirUs);
+    CHECK(policy.watchdogArmed());
+    CHECK(!policy.watchdogExpired(startMs + durationMs - 1));
+    CHECK(policy.watchdogExpired(startMs + durationMs));
+    CHECK(policy.watchdogExpired(startMs + durationMs + 1));
+
+    constexpr uint32_t wrapStartMs = UINT32_MAX - 500u;
+    const uint32_t wrapDeadlineMs = wrapStartMs + durationMs;
+    policy.armWatchdog(wrapStartMs, timeOnAirUs);
+    CHECK(!policy.watchdogExpired(wrapDeadlineMs - 1));
+    CHECK(policy.watchdogExpired(wrapDeadlineMs));
+    CHECK(policy.watchdogExpired(wrapDeadlineMs + 1));
+
+    policy.clear();
+    CHECK(!policy.watchdogArmed());
+    CHECK(!policy.watchdogExpired(wrapDeadlineMs));
+}
+
 TEST_CASE(lora_history_evicts_oldest_and_has_readable_direction_labels) {
     LoRaData model;
     model.beginListening();
@@ -957,6 +1013,8 @@ int main() {
     lora_draft_accepts_printable_ascii_and_copies_exact_payload();
     lora_send_requires_a_listening_nonempty_draft_and_records_exact_tx();
     lora_transmitting_draft_is_immutable_until_completion();
+    lora_pending_tx_snapshots_same_frame_payload_and_locks_edits();
+    lora_tx_watchdog_deadline_is_inclusive_and_wrap_safe();
     lora_history_evicts_oldest_and_has_readable_direction_labels();
     lora_rx_sanitizes_payload_rejects_oversize_and_tracks_quality();
     lora_state_transitions_cover_crc_restart_and_persistent_error();

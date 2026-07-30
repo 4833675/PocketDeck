@@ -112,7 +112,7 @@ void System::update() {
     handleSerialConsole();
     const uint32_t nowMs = millis();
     gps_.update();
-    lora_.update();
+    lora_.update(nowMs);
     wifi_.update(nowMs);
     bleKeyboard_.update(nowMs);
     diagnostics_.drainPending();

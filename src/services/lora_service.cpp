@@ -14,6 +14,7 @@ namespace {
 
 constexpr int8_t kSdCsPin = 12;
 constexpr int8_t kLoRaCsPin = 5;
+constexpr int8_t kLoRaDio1Pin = 4;
 constexpr uint8_t kAntennaSwitchAddress = 0x43;
 constexpr uint8_t kAntennaSwitchPin = 0;
 constexpr uint32_t kAntennaSwitchFrequency = 400000;
@@ -37,33 +38,42 @@ void LoRaService::ensureStarted(DiagnosticsService* diagnostics) {
     startRequested_ = true;
 }
 
-void LoRaService::update() {
+void LoRaService::update(uint32_t nowMs) {
     if (startRequested_ && !startAttempted_) startHardware();
     if (data_.state() == LoRaRadioState::Error ||
         data_.state() == LoRaRadioState::Unavailable) {
         transmitRequested_ = false;
+        txPolicy_.clear();
         return;
     }
 
-    if (consumeDio1Flag()) handleRadioIrq();
+    const bool softwareIrq = consumeDio1Flag();
+    const bool transmitDio1High = data_.state() == LoRaRadioState::Transmitting &&
+                                  digitalRead(kLoRaDio1Pin) == HIGH;
+    if (softwareIrq || transmitDio1High) handleRadioIrq();
+    checkTransmitWatchdog(nowMs);
 
-    if (transmitRequested_) beginRequestedTransmit();
+    if (transmitRequested_) beginRequestedTransmit(nowMs);
 }
 
 bool LoRaService::appendDraft(char character) {
-    return data_.appendDraft(character);
+    return txPolicy_.appendDraft(data_, character);
 }
 
 bool LoRaService::eraseDraft() {
-    return data_.eraseDraft();
+    return txPolicy_.eraseDraft(data_);
 }
 
 void LoRaService::clearDraft() {
-    data_.clearDraft();
+    txPolicy_.clearDraft(data_);
 }
 
 bool LoRaService::requestTransmit() {
-    if (transmitRequested_ || !data_.canSend()) return false;
+    if (transmitRequested_ || txPolicy_.active() || !data_.canSend()) return false;
+    if (!txPolicy_.capture(reinterpret_cast<const uint8_t*>(data_.draft()),
+                           data_.draftLength())) {
+        return false;
+    }
     transmitRequested_ = true;
     return true;
 }
@@ -107,24 +117,31 @@ void LoRaService::startHardware() {
     if (startReceive()) logState("started", RADIOLIB_ERR_NONE);
 }
 
-void LoRaService::beginRequestedTransmit() {
+void LoRaService::beginRequestedTransmit(uint32_t nowMs) {
     transmitRequested_ = false;
-    if (!data_.canSend() || !reconcileReceiveBeforeTransmit()) return;
-    if (!data_.beginTransmit()) return;
+    if (!txPolicy_.active() || !data_.canSend()) {
+        txPolicy_.clear();
+        return;
+    }
+    if (!reconcileReceiveBeforeTransmit()) return;
+    if (!data_.beginTransmit()) {
+        txPolicy_.clear();
+        return;
+    }
 
-    std::array<uint8_t, kLoRaPayloadLimit> payload{};
-    const std::size_t length = data_.copyDraft(payload.data(), payload.size());
-    if (length == 0) {
+    const std::size_t length = txPolicy_.length();
+    if (length == 0 || length > kLoRaPayloadLimit) {
         setPersistentError(RADIOLIB_ERR_UNKNOWN, "tx-copy");
         return;
     }
 
     prepareSharedSpi();
-    const int16_t status = radio_.startTransmit(payload.data(), length);
+    const int16_t status = radio_.startTransmit(txPolicy_.payload(), length);
     if (status != RADIOLIB_ERR_NONE) {
         recoverReceive(status, "tx-start");
         return;
     }
+    txPolicy_.armWatchdog(nowMs, static_cast<uint32_t>(radio_.getTimeOnAir(length)));
     logState("tx-started", status, length);
 }
 
@@ -200,8 +217,23 @@ void LoRaService::handleRadioIrq() {
     logState("irq-stale", RADIOLIB_ERR_NONE);
 }
 
+void LoRaService::checkTransmitWatchdog(uint32_t nowMs) {
+    if (data_.state() != LoRaRadioState::Transmitting ||
+        !txPolicy_.watchdogExpired(nowMs)) {
+        return;
+    }
+
+    prepareSharedSpi();
+    const uint32_t irqFlags = radio_.getIrqFlags();
+    if ((irqFlags & RADIOLIB_SX126X_IRQ_TX_DONE) != 0) {
+        finishTransmit();
+        return;
+    }
+    recoverReceive(RADIOLIB_ERR_TX_TIMEOUT, "tx-watchdog");
+}
+
 void LoRaService::finishTransmit() {
-    const std::size_t length = data_.draftLength();
+    const std::size_t length = txPolicy_.length();
     prepareSharedSpi();
     const int16_t status = radio_.finishTransmit();
     if (status != RADIOLIB_ERR_NONE) {
@@ -210,6 +242,7 @@ void LoRaService::finishTransmit() {
     }
 
     data_.completeTransmit(status);
+    txPolicy_.clear();
     logState("tx-complete", status, length);
     startReceive();
 }
@@ -261,6 +294,7 @@ bool LoRaService::startReceive() {
 
 bool LoRaService::recoverReceive(int16_t operationCode, const char* operation) {
     transmitRequested_ = false;
+    txPolicy_.clear();
     detachDio1();
     consumeDio1Flag();
     data_.beginRecoverableRestart(operationCode);
@@ -291,6 +325,7 @@ bool LoRaService::recoverReceive(int16_t operationCode, const char* operation) {
 
 void LoRaService::setPersistentError(int16_t statusCode, const char* operation) {
     transmitRequested_ = false;
+    txPolicy_.clear();
     detachDio1();
     consumeDio1Flag();
     data_.setPersistentError(statusCode);

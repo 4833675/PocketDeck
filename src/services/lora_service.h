@@ -5,6 +5,7 @@
 #include <modules/SX126x/SX1262.h>
 
 #include "core/lora_data.h"
+#include "core/lora_tx_policy.h"
 
 namespace pd {
 
@@ -13,7 +14,7 @@ class DiagnosticsService;
 class LoRaService {
 public:
     void ensureStarted(DiagnosticsService* diagnostics);
-    void update();
+    void update(uint32_t nowMs);
     bool appendDraft(char character);
     bool eraseDraft();
     void clearDraft();
@@ -25,9 +26,10 @@ private:
     static void IRAM_ATTR onDio1();
 
     void startHardware();
-    void beginRequestedTransmit();
+    void beginRequestedTransmit(uint32_t nowMs);
     bool reconcileReceiveBeforeTransmit();
     void handleRadioIrq();
+    void checkTransmitWatchdog(uint32_t nowMs);
     void finishTransmit();
     bool finishReceive(bool rearm);
     bool startReceive();
@@ -45,6 +47,7 @@ private:
     Module module_{5, 4, 3, 6, SPI};
     SX1262 radio_{&module_};
     LoRaData data_{};
+    LoRaTxPolicy txPolicy_{};
     DiagnosticsService* diagnostics_ = nullptr;
     bool startRequested_ = false;
     bool startAttempted_ = false;
