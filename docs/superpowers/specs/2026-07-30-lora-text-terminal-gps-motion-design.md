@@ -1,6 +1,6 @@
 # Pocket Deck LoRa Text Terminal and GPS Motion Page Design
 
-Status: Ready for user review  
+Status: Approved
 Date: 2026-07-30  
 Target: M5Stack Cardputer Adv with Cap LoRa-1262 (SKU U214)
 
