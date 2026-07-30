@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Arduino.h>
 #include <Module.h>
 #include <modules/SX126x/SX1262.h>
 
@@ -13,21 +14,28 @@ class LoRaService {
 public:
     void ensureStarted(DiagnosticsService* diagnostics);
     void update();
+    bool appendDraft(char character);
+    bool eraseDraft();
+    void clearDraft();
     bool requestTransmit();
 
-    LoRaData& data() { return data_; }
     const LoRaData& data() const { return data_; }
 
 private:
-    static void onDio1();
+    static void IRAM_ATTR onDio1();
 
     void startHardware();
     void beginRequestedTransmit();
+    bool reconcileReceiveBeforeTransmit();
+    void handleRadioIrq();
     void finishTransmit();
-    void finishReceive();
+    bool finishReceive(bool rearm);
     bool startReceive();
     bool recoverReceive(int16_t operationCode, const char* operation);
     void setPersistentError(int16_t statusCode, const char* operation);
+    bool consumeDio1Flag();
+    void attachDio1();
+    void detachDio1();
     void prepareSharedSpi() const;
     void logState(const char* operation, int16_t statusCode,
                   std::size_t length = 0) const;

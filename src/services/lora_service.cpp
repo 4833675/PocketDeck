@@ -45,16 +45,21 @@ void LoRaService::update() {
         return;
     }
 
-    if (dio1Fired_) {
-        dio1Fired_ = false;
-        if (data_.state() == LoRaRadioState::Transmitting) {
-            finishTransmit();
-        } else if (data_.state() == LoRaRadioState::Listening) {
-            finishReceive();
-        }
-    }
+    if (consumeDio1Flag()) handleRadioIrq();
 
     if (transmitRequested_) beginRequestedTransmit();
+}
+
+bool LoRaService::appendDraft(char character) {
+    return data_.appendDraft(character);
+}
+
+bool LoRaService::eraseDraft() {
+    return data_.eraseDraft();
+}
+
+void LoRaService::clearDraft() {
+    data_.clearDraft();
 }
 
 bool LoRaService::requestTransmit() {
@@ -63,7 +68,7 @@ bool LoRaService::requestTransmit() {
     return true;
 }
 
-void LoRaService::onDio1() {
+void IRAM_ATTR LoRaService::onDio1() {
     dio1Fired_ = true;
 }
 
@@ -85,7 +90,7 @@ void LoRaService::startHardware() {
     prepareSharedSpi();
     int16_t status = radio_.begin(kFrequencyMhz, kBandwidthKhz, kSpreadingFactor,
                                   kCodingRateDenominator, kSyncWord, kOutputPowerDbm,
-                                  kPreambleSymbols, kTcxoVoltage, false);
+                                  kPreambleSymbols, kTcxoVoltage, true);
     if (status != RADIOLIB_ERR_NONE) {
         setPersistentError(status, "begin");
         return;
@@ -98,12 +103,13 @@ void LoRaService::startHardware() {
         return;
     }
 
-    radio_.setDio1Action(&LoRaService::onDio1);
+    attachDio1();
     if (startReceive()) logState("started", RADIOLIB_ERR_NONE);
 }
 
 void LoRaService::beginRequestedTransmit() {
     transmitRequested_ = false;
+    if (!data_.canSend() || !reconcileReceiveBeforeTransmit()) return;
     if (!data_.beginTransmit()) return;
 
     std::array<uint8_t, kLoRaPayloadLimit> payload{};
@@ -122,6 +128,74 @@ void LoRaService::beginRequestedTransmit() {
     logState("tx-started", status, length);
 }
 
+bool LoRaService::reconcileReceiveBeforeTransmit() {
+    // Quiesce RX before changing the model state. Any packet that completed
+    // before standby is reconciled while it is still unambiguously an RX.
+    detachDio1();
+    consumeDio1Flag();
+
+    prepareSharedSpi();
+    const int16_t standbyStatus = radio_.standby();
+    if (standbyStatus != RADIOLIB_ERR_NONE) {
+        recoverReceive(standbyStatus, "tx-gate-standby");
+        return false;
+    }
+
+    prepareSharedSpi();
+    const uint32_t irqFlags = radio_.getIrqFlags();
+    if ((irqFlags & RADIOLIB_SX126X_IRQ_RX_DONE) != 0) {
+        if (!finishReceive(false)) return false;
+    } else {
+        prepareSharedSpi();
+        const int16_t clearStatus = radio_.clearIrqFlags(RADIOLIB_SX126X_IRQ_ALL);
+        if (clearStatus != RADIOLIB_ERR_NONE) {
+            recoverReceive(clearStatus, "tx-gate-clear");
+            return false;
+        }
+    }
+
+    consumeDio1Flag();
+    attachDio1();
+    return data_.state() == LoRaRadioState::Listening;
+}
+
+void LoRaService::handleRadioIrq() {
+    // The software flag is only a wakeup. Hardware provenance must match the
+    // active operation before either completion path is allowed to mutate data.
+    prepareSharedSpi();
+    const uint32_t irqFlags = radio_.getIrqFlags();
+    const LoRaRadioState state = data_.state();
+
+    if (state == LoRaRadioState::Transmitting &&
+        (irqFlags & RADIOLIB_SX126X_IRQ_TX_DONE) != 0) {
+        finishTransmit();
+        return;
+    }
+    if (state == LoRaRadioState::Listening &&
+        (irqFlags & RADIOLIB_SX126X_IRQ_RX_DONE) != 0) {
+        finishReceive(true);
+        return;
+    }
+
+    if ((irqFlags & RADIOLIB_SX126X_IRQ_TIMEOUT) != 0) {
+        recoverReceive(state == LoRaRadioState::Transmitting
+                           ? RADIOLIB_ERR_TX_TIMEOUT
+                           : RADIOLIB_ERR_RX_TIMEOUT,
+                       "irq-timeout");
+        return;
+    }
+
+    prepareSharedSpi();
+    const int16_t clearStatus = radio_.clearIrqFlags(RADIOLIB_SX126X_IRQ_ALL);
+    if (clearStatus != RADIOLIB_ERR_NONE) {
+        recoverReceive(clearStatus, "irq-clear");
+        return;
+    }
+
+    logState("irq-stale", RADIOLIB_ERR_NONE);
+    if (state == LoRaRadioState::Listening) startReceive();
+}
+
 void LoRaService::finishTransmit() {
     const std::size_t length = data_.draftLength();
     prepareSharedSpi();
@@ -136,7 +210,7 @@ void LoRaService::finishTransmit() {
     startReceive();
 }
 
-void LoRaService::finishReceive() {
+bool LoRaService::finishReceive(bool rearm) {
     prepareSharedSpi();
     const std::size_t length = radio_.getPacketLength();
     std::array<uint8_t, kLoRaPayloadLimit> payload{};
@@ -150,21 +224,19 @@ void LoRaService::finishReceive() {
         logState("rx-dropped", status, length);
         if (status != RADIOLIB_ERR_NONE && status != RADIOLIB_ERR_CRC_MISMATCH) {
             recoverReceive(status, "rx-read");
-        } else {
-            startReceive();
+            return false;
         }
-        return;
+        return !rearm || startReceive();
     }
 
     if (status == RADIOLIB_ERR_CRC_MISMATCH) {
         data_.recordCrcFailure(status);
         logState("rx-crc", status, length);
-        startReceive();
-        return;
+        return !rearm || startReceive();
     }
     if (status != RADIOLIB_ERR_NONE) {
         recoverReceive(status, "rx-read");
-        return;
+        return false;
     }
 
     prepareSharedSpi();
@@ -172,7 +244,7 @@ void LoRaService::finishReceive() {
     const float snr = radio_.getSNR();
     data_.recordReceive(payload.data(), length, rssi, snr, status);
     logState("rx-complete", status, length);
-    startReceive();
+    return !rearm || startReceive();
 }
 
 bool LoRaService::startReceive() {
@@ -185,7 +257,8 @@ bool LoRaService::startReceive() {
 
 bool LoRaService::recoverReceive(int16_t operationCode, const char* operation) {
     transmitRequested_ = false;
-    dio1Fired_ = false;
+    detachDio1();
+    consumeDio1Flag();
     data_.beginRecoverableRestart(operationCode);
     logState(operation, operationCode);
 
@@ -193,10 +266,18 @@ bool LoRaService::recoverReceive(int16_t operationCode, const char* operation) {
     int16_t status = radio_.standby();
     if (status == RADIOLIB_ERR_NONE) {
         prepareSharedSpi();
+        status = radio_.clearIrqFlags(RADIOLIB_SX126X_IRQ_ALL);
+    }
+    if (status == RADIOLIB_ERR_NONE) {
+        consumeDio1Flag();
+        attachDio1();
+        prepareSharedSpi();
         status = radio_.startReceive();
     }
     data_.completeRecoverableRestart(status);
     if (status != RADIOLIB_ERR_NONE) {
+        detachDio1();
+        consumeDio1Flag();
         logState("recovery-failed", status);
         return false;
     }
@@ -206,9 +287,26 @@ bool LoRaService::recoverReceive(int16_t operationCode, const char* operation) {
 
 void LoRaService::setPersistentError(int16_t statusCode, const char* operation) {
     transmitRequested_ = false;
-    dio1Fired_ = false;
+    detachDio1();
+    consumeDio1Flag();
     data_.setPersistentError(statusCode);
     logState(operation, statusCode);
+}
+
+bool LoRaService::consumeDio1Flag() {
+    noInterrupts();
+    const bool fired = dio1Fired_;
+    dio1Fired_ = false;
+    interrupts();
+    return fired;
+}
+
+void LoRaService::attachDio1() {
+    radio_.setDio1Action(&LoRaService::onDio1);
+}
+
+void LoRaService::detachDio1() {
+    radio_.clearDio1Action();
 }
 
 void LoRaService::prepareSharedSpi() const {
