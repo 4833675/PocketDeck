@@ -8,22 +8,23 @@ This is the current handoff for the Pocket Deck repository. Read it with
 ## Current state
 
 - Repository: `https://github.com/4833675/PocketDeck`, branch `main`.
-- Current integration is `v0.5.0`: multi-profile Wi-Fi, Pocket SSH Terminal,
-  four-page GPS, and raw LoRa P2P are included with the existing shell, BLE
-  keyboard, weather, settings, and diagnostics.
-- `v0.5.0` builds and is flashed without clearing NVS. Real-device validation
+- Current integration is `v0.6.0`: multi-profile Wi-Fi, Pocket SSH Terminal,
+  four-page GPS, raw LoRa P2P, and foreground TF-card MP3 playback are included
+  with the existing shell, BLE keyboard, weather, settings, and diagnostics.
+- The previous `v0.5.0` image was flashed without clearing NVS. Real-device validation
   reached `CONNECTING -> AUTHENTICATING -> OPENING SHELL -> CONNECTED` against a
   public-key-only server; host creation also survived repeated uploads/restarts.
   Terminal typing, controls, scrollback, and reconnect scenarios remain pending.
-- Integrated LoRa/GPS automated validation: `scripts/test-native.sh` passed 798
-  checks; a clean `pio run -e cardputer-adv` with RadioLib 7.7.1 used 81,680 /
-  327,680 bytes RAM (24.9%) and 1,695,989 / 3,145,728 bytes flash (53.9%). The
-  clean build emitted ten pre-existing LibSSH-ESP32 compiler warnings and no
-  RadioLib warning.
+- Integrated MEDIA/LoRa/GPS automated validation: `scripts/test-native.sh`
+  passed 876 checks; a clean build followed by `pio run -e cardputer-adv` with
+  ESP8266Audio 2.2.0 and RadioLib 7.7.1 used 86,000 / 327,680 bytes RAM (26.2%)
+  and 1,811,289 / 3,145,728 bytes flash (57.6%). Only the pre-existing
+  LibSSH-ESP32 compiler warnings remain.
 - No LoRa Cap, antenna, RF, or two-endpoint hardware claim has been made.
-- The final integrated image was uploaded without erasing NVS on 2026-07-30;
-  the USB console answered `HELP` after restart. LORA was not opened, so the
-  upload proves normal boot/main-loop responsiveness only, not Cap or RF use.
+- The `v0.6.0` MEDIA image was uploaded without erasing NVS on 2026-07-30; the
+  USB console answered `HELP` after restart. MEDIA and LORA were not opened, so
+  the upload proves normal boot/main-loop responsiveness only, not MP3/audio,
+  Cap, or RF behavior.
 - Real-device logs confirmed BLE reconnect, successful Wi-Fi scans, and a manual
   Tab scan (`raw=29`, strongest 8 displayed). The one migrated saved SSID was
   not visible at the test location (`candidates=0`), which is expected.
@@ -47,6 +48,8 @@ Current apps and services:
 - Four-page GPS dashboard for the optional Cap LoRa-1262, including a motion-only
   page with speed/course validity and stale-data handling.
 - Raw LoRa P2P text terminal for the Cap SX1262 and a matching RadioLib peer.
+- Foreground MEDIA player for up to 32 MP3 files in `/Music`, using
+  ESP8266Audio 2.2.0 and the M5 speaker/AUX output.
 - Wi-Fi manager with eight profiles, NTP clock, and GPS-local Open-Meteo weather.
 - Pocket SSH Terminal with six NVS host entries, one PTY shell, public-key auth,
   40×13 ANSI display, 64-line scrollback, reconnect, and quick commands.
@@ -81,6 +84,8 @@ Current apps and services:
 - GPS/weather: `src/services/gps_service.*`, `weather_service.*`.
 - LoRa: `src/core/lora_data.*`, `src/services/lora_service.*`, and
   `src/apps/lora/`; `System` owns the service and calls its update loop.
+- MEDIA: `src/core/media_data.*`, `src/services/media_service.*`, and
+  `src/apps/media/`; playback objects exist only while a track is loaded.
 - SSH: `src/core/ssh_*`, `terminal_*`, `src/services/ssh_*`, and
   `src/apps/ssh/`. Build-time key generation is `scripts/embed_ssh_key.py`.
 - UI/apps: `src/apps/`, `src/ui/`, `src/drivers/display.*`.
@@ -117,6 +122,8 @@ Current apps and services:
   Missing Cap/error must not block GPS, TF, BLE, Wi-Fi, weather, or SSH. RX/TX
   payloads are bounded to 120 printable-ASCII bytes; RX is sanitized and
   oversize input drops. Keep six in-RAM records only.
+- MEDIA scans only `/Music`, keeps 32 fixed-size records, never remounts TF, and
+  stops/releases MP3 objects on app exit. Never log filenames or audio content.
 - TF logging closes each append so unexpected power loss does not strand a long
   buffered session. Logs rotate at 512 KB.
 - The repository never contains the SSH private key. PlatformIO reads an
@@ -151,22 +158,24 @@ Serial log commands: `HELP`, `LOG STATUS`, `LOG DUMP`, `LOG DUMP ALL`, and
 
 ## Near-term validation
 
-1. Run `docs/validation/lora-text-terminal-smoke-test.md` with antenna attached
+1. Run `docs/validation/media-mp3-smoke-test.md` with disposable MP3 files and
+   verify speaker/AUX, pause/skip/auto-next, TF logs, memory, and regressions.
+2. Run `docs/validation/lora-text-terminal-smoke-test.md` with antenna attached
    and a matching second SX1262/RadioLib endpoint; all RF, shared-SPI, and
    regression rows remain pending until observed.
-2. Run the new GPS 4/4 moving, stationary, invalid, and stale-motion rows
+3. Run the new GPS 4/4 moving, stationary, invalid, and stale-motion rows
    outdoors without sharing precise coordinates.
-3. Continue `docs/validation/ssh-terminal-smoke-test.md` from terminal input,
+4. Continue `docs/validation/ssh-terminal-smoke-test.md` from terminal input,
    control keys, quick commands, scrollback, disconnect, and reconnect checks.
-4. Recheck BLE, Wi-Fi, weather, GPS, heap, and UI responsiveness after the SSH
+5. Recheck BLE, Wi-Fi, weather, GPS, heap, and UI responsiveness after the SSH
    worker has been created.
-5. Connect a second 2.4 GHz network and confirm both entries appear under Saved
+6. Connect a second 2.4 GHz network and confirm both entries appear under Saved
    networks and saved scan rows show `S`.
-6. Restart near each network separately and confirm automatic connection.
-7. Make both visible and confirm strongest-known selection; then make the first
+7. Restart near each network separately and confirm automatic connection.
+8. Make both visible and confirm strongest-known selection; then make the first
    candidate fail and confirm fallback.
-8. Delete one profile and verify the other survives restart.
-9. Recheck BLE typing and range-loss reconnect while Wi-Fi scans periodically.
+9. Delete one profile and verify the other survives restart.
+10. Recheck BLE typing and range-loss reconnect while Wi-Fi scans periodically.
 
 Use the matching files in `docs/validation/` to record results. After the device
 owner confirms behavior, update this section, commit locally, and push only if

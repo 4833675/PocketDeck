@@ -17,7 +17,8 @@ SSH, diagnostics, and TF logging services on a device with no PSRAM.
 - Keep at most 32 tracks in a fixed-capacity, case-insensitively sorted library.
 - Show a compact scrollable library with the selected and currently loaded track.
 - Play through `M5Cardputer.Speaker` using the same ESP8266Audio adapter pattern
-  as M5Stack's official M5Unified MP3 example.
+  as M5Stack's official M5Unified MP3 example. Version 2.2.0 is pinned because
+  later releases require the newer ESP32 I2S API absent from this toolchain.
 - Show playback state, elapsed active-play time, and byte-position progress.
 - Automatically advance to the next track when a file finishes.
 - Reuse the system volume and persist volume changes through the existing

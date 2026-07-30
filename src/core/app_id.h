@@ -11,6 +11,7 @@ enum class AppId : uint8_t {
     Ssh,
     Gps,
     LoRa,
+    Media,
     Weather,
     Settings,
 };

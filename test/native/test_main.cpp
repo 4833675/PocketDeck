@@ -8,6 +8,7 @@
 #include "apps/launcher/launcher_model.h"
 #include "apps/gps/gps_app_model.h"
 #include "apps/lora/lora_app_model.h"
+#include "apps/media/media_app_model.h"
 #include "apps/settings/settings_model.h"
 #include "apps/ssh/ssh_app_model.h"
 #include "core/ble_keyboard_policy.h"
@@ -16,6 +17,7 @@
 #include "core/gps_data.h"
 #include "core/lora_data.h"
 #include "core/lora_tx_policy.h"
+#include "core/media_data.h"
 #include "core/input_router.h"
 #include "core/mac_keymap.h"
 #include "core/serial_command.h"
@@ -24,6 +26,7 @@
 #include "core/ssh_host_record.h"
 #include "core/ssh_memory_budget.h"
 #include "core/system_settings.h"
+#include "core/system_context.h"
 #include "core/terminal_buffer.h"
 #include "core/terminal_input.h"
 #include "core/text_keymap.h"
@@ -407,6 +410,8 @@ TEST_CASE(launcher_starts_on_keyboard_and_wraps) {
     model.handle(InputAction::Right);
     CHECK_EQ(model.selected(), AppId::LoRa);
     model.handle(InputAction::Right);
+    CHECK_EQ(model.selected(), AppId::Media);
+    model.handle(InputAction::Right);
     CHECK_EQ(model.selected(), AppId::Weather);
     model.handle(InputAction::Right);
     CHECK_EQ(model.selected(), AppId::Settings);
@@ -425,6 +430,8 @@ TEST_CASE(launcher_confirm_requests_selected_app) {
     CHECK_EQ(model.handle(InputAction::Confirm), AppId::Gps);
     model.handle(InputAction::Right);
     CHECK_EQ(model.handle(InputAction::Confirm), AppId::LoRa);
+    model.handle(InputAction::Right);
+    CHECK_EQ(model.handle(InputAction::Confirm), AppId::Media);
     model.handle(InputAction::Right);
     CHECK_EQ(model.handle(InputAction::Confirm), AppId::Weather);
     model.handle(InputAction::Right);
@@ -1439,6 +1446,96 @@ TEST_CASE(lora_app_does_not_request_duplicate_send_while_transmitting) {
     CHECK(model.sendRejectedVisible(84));
 }
 
+TEST_CASE(media_library_filters_sorts_and_exposes_display_names) {
+    MediaLibrary library;
+    CHECK(!library.add("/Music/not-a-track.wav", 10));
+    CHECK(library.add("/Music/zebra.MP3", 300));
+    CHECK(library.add("/Music/Alpha.mp3", 100));
+    CHECK(library.add("/Music/beta.mP3", 200));
+    library.sort();
+
+    CHECK_EQ(library.size(), 3u);
+    CHECK_STR_EQ(mediaTrackName(library.at(0)), "Alpha.mp3");
+    CHECK_STR_EQ(mediaTrackName(library.at(1)), "beta.mP3");
+    CHECK_STR_EQ(mediaTrackName(library.at(2)), "zebra.MP3");
+    CHECK_EQ(library.at(1).bytes, 200u);
+    CHECK(mediaPathIsMp3("song.mp3"));
+    CHECK(!mediaPathIsMp3(".mp3"));
+    CHECK(!mediaPathIsMp3("song.mp30"));
+}
+
+TEST_CASE(media_library_is_bounded_and_selection_wraps) {
+    MediaLibrary library;
+    for (std::size_t index = 0; index < kMediaTrackCapacity + 1; ++index) {
+        char path[40];
+        std::snprintf(path, sizeof(path), "/Music/%02u.mp3", static_cast<unsigned>(index));
+        const bool added = library.add(path, static_cast<uint32_t>(index));
+        CHECK_EQ(added, index < kMediaTrackCapacity);
+    }
+    CHECK_EQ(library.size(), kMediaTrackCapacity);
+    CHECK(library.truncated());
+    CHECK(library.add("/Music/00a.mp3", 99));
+    library.sort();
+    CHECK_STR_EQ(mediaTrackName(library.at(1)), "00a.mp3");
+    CHECK_STR_EQ(mediaTrackName(library.at(kMediaTrackCapacity - 1)), "30.mp3");
+    library.moveSelection(-1);
+    CHECK_EQ(library.selectedIndex(), kMediaTrackCapacity - 1);
+    library.moveSelection(1);
+    CHECK_EQ(library.selectedIndex(), 0u);
+    library.select(4);
+    CHECK_EQ(library.selectedIndex(), 4u);
+    library.select(kMediaTrackCapacity);
+    CHECK_EQ(library.selectedIndex(), 4u);
+}
+
+TEST_CASE(media_progress_and_elapsed_clock_are_bounded_and_wrap_safe) {
+    CHECK_EQ(mediaProgressPercent(0, 0), 0);
+    CHECK_EQ(mediaProgressPercent(50, 200), 25);
+    CHECK_EQ(mediaProgressPercent(300, 200), 100);
+
+    MediaElapsedClock clock;
+    clock.start(UINT32_MAX - 10u);
+    CHECK_EQ(clock.elapsed(4), 15u);
+    clock.pause(9);
+    CHECK_EQ(clock.elapsed(100), 20u);
+    clock.resume(100);
+    CHECK_EQ(clock.elapsed(110), 30u);
+    clock.stop();
+    CHECK_EQ(clock.elapsed(999), 0u);
+}
+
+TEST_CASE(media_app_maps_library_playback_volume_rescan_and_home) {
+    MediaAppModel model;
+    CHECK_EQ(model.enter(), MediaAppEffect::Scan);
+    CHECK_EQ(model.handle({InputAction::Up, '\0'}, true).effect,
+             MediaAppEffect::SelectPrevious);
+    CHECK_EQ(model.handle({InputAction::Down, '\0'}, true).effect,
+             MediaAppEffect::SelectNext);
+    CHECK_EQ(model.handle({InputAction::Left, '\0'}, true).effect,
+             MediaAppEffect::PlayPrevious);
+    CHECK_EQ(model.handle({InputAction::Right, '\0'}, true).effect,
+             MediaAppEffect::PlayNext);
+    CHECK_EQ(model.handle({InputAction::Confirm, '\0'}, true).effect,
+             MediaAppEffect::ToggleSelected);
+    CHECK_EQ(model.handle({InputAction::Tab, '\0'}, false).effect, MediaAppEffect::Scan);
+    CHECK_EQ(model.handle({InputAction::None, '-'}, false).volumeDelta, -5);
+    CHECK_EQ(model.handle({InputAction::None, '+'}, false).volumeDelta, 5);
+    CHECK_EQ(model.handle({InputAction::Erase, '\0'}, false).effect,
+             MediaAppEffect::StopAndGoHome);
+    CHECK_EQ(model.handle({InputAction::Confirm, '\0'}, false).effect,
+             MediaAppEffect::None);
+}
+
+TEST_CASE(media_volume_request_is_explicit_and_consumed_once) {
+    SystemContext context;
+    context.requestVolumeDelta(-5);
+    CHECK_EQ(context.takeRequestedCommand(), SystemCommand::AdjustVolume);
+    int8_t delta = 0;
+    CHECK(context.takeVolumeDelta(delta));
+    CHECK_EQ(delta, -5);
+    CHECK(!context.takeVolumeDelta(delta));
+}
+
 int main() {
     ssh_error_detail_redacts_endpoint_identity();
     ssh_error_detail_stays_single_line_and_never_partially_copies_secret();
@@ -1529,5 +1626,10 @@ int main() {
     lora_app_maps_text_edit_send_and_home_actions();
     lora_app_rejected_send_feedback_is_bounded_visible_and_wrap_safe();
     lora_app_does_not_request_duplicate_send_while_transmitting();
+    media_library_filters_sorts_and_exposes_display_names();
+    media_library_is_bounded_and_selection_wraps();
+    media_progress_and_elapsed_clock_are_bounded_and_wrap_safe();
+    media_app_maps_library_playback_volume_rescan_and_home();
+    media_volume_request_is_explicit_and_consumed_once();
     return pd_test::finish();
 }

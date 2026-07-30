@@ -60,6 +60,7 @@ void System::begin() {
     context_.bleKeyboard = &bleKeyboard_;
     context_.gps = &gps_;
     context_.lora = &lora_;
+    context_.media = &media_;
     context_.wifi = &wifi_;
     context_.weather = &weather_;
     context_.sdLog = &sdLog_;
@@ -115,6 +116,7 @@ void System::update() {
     const uint32_t nowMs = millis();
     gps_.update();
     lora_.update(nowMs);
+    media_.update(nowMs);
     wifi_.update(nowMs);
     bleKeyboard_.update(nowMs);
     diagnostics_.drainPending();
@@ -244,6 +246,7 @@ App* System::appForId(AppId id) {
     if (id == AppId::Ssh) return &sshApp_;
     if (id == AppId::Gps) return &gpsApp_;
     if (id == AppId::LoRa) return &loraApp_;
+    if (id == AppId::Media) return &mediaApp_;
     if (id == AppId::Weather) return &weatherApp_;
     if (id == AppId::Settings) return &settingsApp_;
     return nullptr;
@@ -350,6 +353,20 @@ void System::handleSystemCommand(SystemCommand command) {
                                      : "TF card format/log failed");
             return;
         }
+        case SystemCommand::AdjustVolume: {
+            int8_t delta = 0;
+            if (!context_.takeVolumeDelta(delta)) return;
+            int adjusted = static_cast<int>(settings_.volume) + delta;
+            if (adjusted < 0) adjusted = 0;
+            if (adjusted > 100) adjusted = 100;
+            if (settings_.volume != static_cast<uint8_t>(adjusted)) {
+                settings_.volume = static_cast<uint8_t>(adjusted);
+                context_.volumePercent = settings_.volume;
+                board_.setVolume(settings_.volume);
+                saveSettings();
+            }
+            return;
+        }
         case SystemCommand::Restart:
             diagnostics_.log("System restart requested");
             delay(80);
@@ -374,6 +391,7 @@ void System::handleSystemCommand(SystemCommand command) {
 void System::refreshContext(uint32_t nowMs) {
     context_.uptimeMs = nowMs;
     context_.batteryPercent = board_.batteryPercent();
+    context_.volumePercent = settings_.volume;
     context_.freeHeap = ESP.getFreeHeap();
     context_.minimumFreeHeap = ESP.getMinFreeHeap();
     const BleKeyboardSnapshot ble = bleKeyboard_.snapshot();

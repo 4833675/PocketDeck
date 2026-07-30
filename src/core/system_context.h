@@ -12,6 +12,7 @@ class BleKeyboardService;
 class DiagnosticsService;
 class GpsService;
 class LoRaService;
+class MediaService;
 class SdLogService;
 class SshHostStore;
 class SshService;
@@ -38,6 +39,7 @@ enum class SystemCommand : uint8_t {
     ForgetHost,
     MountStorage,
     FormatStorage,
+    AdjustVolume,
     Restart,
     FactoryReset,
 };
@@ -45,6 +47,7 @@ enum class SystemCommand : uint8_t {
 struct SystemContext {
     AppId requestedApp = AppId::None;
     uint8_t batteryPercent = 0;
+    uint8_t volumePercent = 0;
     bool bleEnabled = true;
     bool bleConnected = false;
     bool wifiEnabled = false;
@@ -60,6 +63,7 @@ struct SystemContext {
     BleKeyboardService* bleKeyboard = nullptr;
     GpsService* gps = nullptr;
     LoRaService* lora = nullptr;
+    MediaService* media = nullptr;
     WifiService* wifi = nullptr;
     WeatherService* weather = nullptr;
     SdLogService* sdLog = nullptr;
@@ -122,12 +126,28 @@ struct SystemContext {
         return true;
     }
 
+    void requestVolumeDelta(int8_t delta) {
+        volumeDelta_ = delta;
+        volumeDeltaPending_ = true;
+        requestedCommand_ = SystemCommand::AdjustVolume;
+    }
+
+    bool takeVolumeDelta(int8_t& delta) {
+        if (!volumeDeltaPending_) return false;
+        delta = volumeDelta_;
+        volumeDelta_ = 0;
+        volumeDeltaPending_ = false;
+        return true;
+    }
+
 private:
     SystemCommand requestedCommand_ = SystemCommand::None;
     WifiConnectRequest wifiConnectRequest_{};
     bool wifiConnectPending_ = false;
     std::array<char, WifiConnectRequest::kSsidCapacity> wifiForgetSsid_{};
     bool wifiForgetPending_ = false;
+    int8_t volumeDelta_ = 0;
+    bool volumeDeltaPending_ = false;
 };
 
 }  // namespace pd

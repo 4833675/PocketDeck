@@ -2,13 +2,14 @@
 
 Pocket Deck is standalone, keyboard-first firmware for the **M5Stack Cardputer
 Adv** (Stamp-S3A, 240×135 display, 8 MB flash). It turns the device into a small
-system deck with a secure macOS Bluetooth keyboard, Pocket SSH terminal, GPS
-dashboard, multi-profile Wi-Fi, time, weather, settings, and diagnostics.
+system deck with a secure macOS Bluetooth keyboard, Pocket SSH terminal, GPS,
+LoRa, TF-card MP3 playback, multi-profile Wi-Fi, time, weather, settings, and
+diagnostics.
 
 It is a from-scratch project, not a Claude Desktop Buddy fork, and it does not
 support the original Cardputer model.
 
-Current firmware: **0.5.0**
+Current firmware: **0.6.0**
 
 ## Features
 
@@ -21,6 +22,7 @@ Current firmware: **0.5.0**
   ANSI colors, local scrollback, reconnect, and quick commands.
 - Four-page GNSS dashboard for the optional M5Stack Cap LoRa-1262.
 - Raw LoRa P2P text terminal for a matching SX1262/RadioLib peer.
+- Foreground MP3 player for up to 32 tracks under `/Music` on a TF card.
 - Versioned Preferences/NVS settings and confirmed destructive actions.
 - On-device diagnostics plus optional rotating logs on a TF/microSD card.
 
@@ -37,7 +39,7 @@ Required:
 Optional:
 
 - M5Stack Cap LoRa-1262 for GPS, location-based weather, and LoRa P2P
-- FAT-formatted TF/microSD card for persistent diagnostics
+- FAT-formatted TF/microSD card for MP3 playback and persistent diagnostics
 
 The target has no PSRAM. The firmware uses one 3 MB application partition and
 has no OTA slot. No LittleFS assets are currently required.
@@ -84,10 +86,10 @@ The Cardputer has no dedicated arrow cluster, so local navigation uses Fn:
 | G0 tap | Home |
 | G0 hold for 600 ms | Quick Settings |
 
-Home contains Keyboard, SSH Terminal, GPS, LORA, Weather, and Settings. The
-status bar shows local 24-hour time, `WiFi`, `BT`, and battery percentage. Wi-Fi
-and Bluetooth are mint when connected, amber when enabled but disconnected, and
-red when disabled.
+Home contains Keyboard, SSH Terminal, GPS, LORA, MEDIA, Weather, and Settings.
+The status bar shows local 24-hour time, `WiFi`, `BT`, and battery percentage.
+Wi-Fi and Bluetooth are mint when connected, amber when enabled but
+disconnected, and red when disabled.
 
 Quick Settings uses Left/Right for brightness, Up/Down for volume, Enter to
 toggle Bluetooth, and Backspace or G0 to close and save.
@@ -286,6 +288,37 @@ See the [LoRa text-terminal hardware checklist](docs/validation/lora-text-termin
 for the required two-endpoint, antenna, RF recovery, TF coexistence, and
 regression evidence. A successful build does not prove radio operation.
 
+## MEDIA MP3 player
+
+MEDIA plays MP3 files from the Cardputer Adv TF card through the built-in
+speaker or 3.5 mm audio output. Create `/Music` in the card root, copy MP3 files
+into that directory, insert the card, and restart Pocket Deck. The scan is
+non-recursive, accepts `.mp3` case-insensitively, sorts filenames, and keeps at
+most 32 tracks in RAM. Short ASCII filenames render most reliably with the
+built-in display font.
+
+| Control | MEDIA action |
+|---|---|
+| Fn + Up / Down | Select previous / next library row |
+| Enter | Play the selected track or pause/resume the loaded track |
+| Fn + Left / Right | Play previous / next track |
+| `-` / `=` | Volume −5 / +5 and save the new level |
+| Tab | Rescan while stopped |
+| Backspace or G0 | Stop, release the decoder, and return Home |
+
+The screen shows active-play elapsed time and byte-position progress; variable
+bitrate files can therefore make the percentage advance unevenly. End of file
+automatically advances to the next track. Playback is foreground-only: leaving
+MEDIA closes the MP3 and stops audio. The first version has no ID3 metadata,
+cover art, seeking, playlists, shuffle, background playback, or other codecs.
+
+MEDIA reuses the already-mounted TF card instead of remounting it. TF logs and
+the SX1262 share the existing SPI bus and remain serialized by the main system
+loop. MP3 decoding uses
+[ESP8266Audio 2.2.0](https://github.com/earlephilhower/ESP8266Audio/tree/2.2.0),
+which is GPL-3.0 software; comply with that license when distributing firmware
+binaries.
+
 ## Diagnostics and TF card
 
 Settings > System > Diagnostics shows reset reason, memory and recent events.
@@ -330,6 +363,12 @@ coordinates are deliberately excluded from diagnostics.
 - **GPS remains `SEARCHING`:** test outdoors with the antenna facing open sky.
 - **LORA says `RADIO NOT FOUND`:** confirm the Cap is seated and its antenna is
   attached before retrying. Do not transmit without an antenna.
+- **MEDIA says `NO TF CARD`:** mount the card under Settings > System > TF card
+  logs, then return to MEDIA and press Tab.
+- **MEDIA says `NO MP3 FILES`:** copy MP3 files directly into `/Music`; nested
+  folders and other audio formats are ignored.
+- **MEDIA says `OUT OF MEMORY`:** restart Pocket Deck before playing, especially
+  after opening SSH; the device has no PSRAM.
 - **Weather will not update:** verify a fresh GPS fix, Wi-Fi/IP, and NTP, then
   press Enter in Weather.
 - **SSH key missing:** rebuild with a readable `POCKETDECK_SSH_KEY` path or
@@ -349,14 +388,15 @@ coordinates are deliberately excluded from diagnostics.
 - [Hardware validation checklists](docs/validation/)
 - [GPS hardware checklist](docs/validation/gps-smoke-test.md)
 - [LoRa text-terminal checklist](docs/validation/lora-text-terminal-smoke-test.md)
+- [MEDIA MP3 checklist](docs/validation/media-mp3-smoke-test.md)
 
 Source layout:
 
 ```text
 src/core/       lifecycle, state, policies, input routing, portable models
 src/drivers/    Cardputer board and display adapters
-src/services/   BLE, Wi-Fi, SSH, GPS, LoRa, weather, NVS, TF diagnostics
-src/apps/       launcher, Keyboard, SSH, GPS, LORA, Weather, Settings
+src/services/   BLE, Wi-Fi, SSH, GPS, LoRa, MEDIA, weather, NVS, TF diagnostics
+src/apps/       launcher, Keyboard, SSH, GPS, LORA, MEDIA, Weather, Settings
 src/ui/         shared status bar and Quick Settings
 test/native/    hardware-independent C++ tests
 ```

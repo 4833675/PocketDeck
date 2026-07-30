@@ -43,6 +43,9 @@ pio device monitor -e cardputer-adv
 - Optional Cap LoRa-1262 GPS uses UART RX GPIO15, TX GPIO13, 115200 baud.
 - TF logging shares SPI pins with the Cap. Keep the Cap chip-select inactive and
   avoid long-lived open files.
+- MEDIA is the one intentional exception: it may keep one read-only MP3 file
+  open only while foreground playback is active. Audio/SD work stays on the main
+  task and the file must close before mount, format, or app exit.
 - Native USB re-enumerates on reset; a monitor attached afterward may miss early
   serial output. Persistent TF logs are the reliable boot-history source.
 
@@ -64,7 +67,7 @@ pio device monitor -e cardputer-adv
 - BLE HID accepts one bonded host and sends reports only from the foreground
   Keyboard app over an authenticated, encrypted link.
 - Never log typed characters, HID reports, Wi-Fi passwords, pairing passkeys, or
-  precise GPS coordinates.
+  precise GPS coordinates. MEDIA also never logs track filenames or audio data.
 - Wi-Fi owns up to eight profiles in the `pocketwifi` NVS namespace. Arduino
   persistence and automatic reconnect stay disabled; `WifiService` controls
   scan, selection, fallback, and retry.
