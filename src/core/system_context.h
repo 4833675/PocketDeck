@@ -11,6 +11,7 @@ namespace pd {
 class BleKeyboardService;
 class DiagnosticsService;
 class GpsService;
+class LoRaService;
 class SdLogService;
 class WifiService;
 class WeatherService;
@@ -56,10 +57,11 @@ struct SystemContext {
     const char* resetReason = "unknown";
     BleKeyboardService* bleKeyboard = nullptr;
     GpsService* gps = nullptr;
+    LoRaService* lora = nullptr;
     WifiService* wifi = nullptr;
     WeatherService* weather = nullptr;
     SdLogService* sdLog = nullptr;
-    const DiagnosticsService* diagnostics = nullptr;
+    DiagnosticsService* diagnostics = nullptr;
     const SystemSettings* settings = nullptr;
 
     void requestApp(AppId app) { requestedApp = app; }

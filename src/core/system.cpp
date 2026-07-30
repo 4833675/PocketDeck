@@ -59,6 +59,7 @@ void System::begin() {
     context_.resetReason = resetReasonName(esp_reset_reason());
     context_.bleKeyboard = &bleKeyboard_;
     context_.gps = &gps_;
+    context_.lora = &lora_;
     context_.wifi = &wifi_;
     context_.weather = &weather_;
     context_.sdLog = &sdLog_;
@@ -111,6 +112,7 @@ void System::update() {
     handleSerialConsole();
     const uint32_t nowMs = millis();
     gps_.update();
+    lora_.update();
     wifi_.update(nowMs);
     bleKeyboard_.update(nowMs);
     diagnostics_.drainPending();
@@ -238,6 +240,7 @@ App* System::appForId(AppId id) {
     if (id == AppId::Launcher) return &launcher_;
     if (id == AppId::Keyboard) return &keyboard_;
     if (id == AppId::Gps) return &gpsApp_;
+    if (id == AppId::LoRa) return &loraApp_;
     if (id == AppId::Weather) return &weatherApp_;
     if (id == AppId::Settings) return &settingsApp_;
     return nullptr;

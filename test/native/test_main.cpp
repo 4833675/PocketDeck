@@ -281,6 +281,8 @@ TEST_CASE(launcher_starts_on_keyboard_and_wraps) {
     model.handle(InputAction::Right);
     CHECK_EQ(model.selected(), AppId::Gps);
     model.handle(InputAction::Right);
+    CHECK_EQ(model.selected(), AppId::LoRa);
+    model.handle(InputAction::Right);
     CHECK_EQ(model.selected(), AppId::Weather);
     model.handle(InputAction::Right);
     CHECK_EQ(model.selected(), AppId::Settings);
@@ -295,6 +297,8 @@ TEST_CASE(launcher_confirm_requests_selected_app) {
     CHECK_EQ(model.handle(InputAction::Confirm), AppId::Keyboard);
     model.handle(InputAction::Right);
     CHECK_EQ(model.handle(InputAction::Confirm), AppId::Gps);
+    model.handle(InputAction::Right);
+    CHECK_EQ(model.handle(InputAction::Confirm), AppId::LoRa);
     model.handle(InputAction::Right);
     CHECK_EQ(model.handle(InputAction::Confirm), AppId::Weather);
     model.handle(InputAction::Right);

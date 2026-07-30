@@ -6,6 +6,7 @@
 #include "apps/gps/gps_app.h"
 #include "apps/keyboard/keyboard_app.h"
 #include "apps/launcher/launcher_app.h"
+#include "apps/lora/lora_app.h"
 #include "apps/settings/settings_app.h"
 #include "apps/weather/weather_app.h"
 #include "core/g0_gesture.h"
@@ -17,6 +18,7 @@
 #include "services/ble_keyboard_service.h"
 #include "services/diagnostics_service.h"
 #include "services/gps_service.h"
+#include "services/lora_service.h"
 #include "services/sd_log_service.h"
 #include "services/settings_store.h"
 #include "services/wifi_service.h"
@@ -53,6 +55,7 @@ private:
     Display display_;
     BleKeyboardService bleKeyboard_;
     GpsService gps_;
+    LoRaService lora_;
     WifiService wifi_;
     WeatherService weather_;
     SdLogService sdLog_;
@@ -65,6 +68,7 @@ private:
     LauncherApp launcher_;
     KeyboardApp keyboard_;
     GpsApp gpsApp_;
+    LoRaApp loraApp_;
     WeatherApp weatherApp_;
     SettingsApp settingsApp_;
     QuickSettings quickSettings_;

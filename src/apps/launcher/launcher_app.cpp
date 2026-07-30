@@ -18,6 +18,7 @@ const char* appTitle(AppId id) {
     switch (id) {
         case AppId::Keyboard: return "KEYBOARD";
         case AppId::Gps: return "GPS";
+        case AppId::LoRa: return "LORA";
         case AppId::Weather: return "WEATHER";
         case AppId::Settings: return "SETTINGS";
         default: return "APP";
@@ -28,6 +29,7 @@ const char* appIcon(AppId id) {
     switch (id) {
         case AppId::Keyboard: return ">_";
         case AppId::Gps: return "G+";
+        case AppId::LoRa: return "LR";
         case AppId::Weather: return "WX";
         case AppId::Settings: return "::";
         default: return "--";
@@ -78,6 +80,8 @@ void LauncherApp::render(Display& display, const SystemContext& context) {
         } else {
             std::snprintf(subtitle, sizeof(subtitle), "%s", gpsStateLabel(classifyGpsState(gps)));
         }
+    } else if (model_.selected() == AppId::LoRa) {
+        std::snprintf(subtitle, sizeof(subtitle), "Raw 868 MHz terminal");
     } else if (model_.selected() == AppId::Weather) {
         const WeatherSnapshot weather = context.weather != nullptr
                                             ? context.weather->snapshot()
