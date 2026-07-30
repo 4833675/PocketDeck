@@ -4,6 +4,7 @@
 #include <cstring>
 #include <utility>
 
+#include "apps/gps/gps_app_model.h"
 #include "apps/launcher/launcher_model.h"
 #include "apps/settings/settings_model.h"
 #include "core/ble_keyboard_policy.h"
@@ -376,6 +377,38 @@ TEST_CASE(gps_state_distinguishes_stream_search_fix_and_stale) {
 
     snapshot.dataAgeMs = 4000;
     CHECK_EQ(classifyGpsState(snapshot), GpsState::NoStream);
+}
+
+TEST_CASE(gps_page_navigation_wraps_across_all_four_pages) {
+    GpsAppModel model;
+    CHECK_EQ(model.page(), GpsPage::Position);
+
+    model.handle(InputAction::Left);
+    CHECK_EQ(model.page(), GpsPage::Motion);
+    model.handle(InputAction::Left);
+    CHECK_EQ(model.page(), GpsPage::Receiver);
+    model.handle(InputAction::Left);
+    CHECK_EQ(model.page(), GpsPage::Time);
+    model.handle(InputAction::Left);
+    CHECK_EQ(model.page(), GpsPage::Position);
+
+    model.handle(InputAction::Right);
+    CHECK_EQ(model.page(), GpsPage::Time);
+    model.handle(InputAction::Right);
+    CHECK_EQ(model.page(), GpsPage::Receiver);
+    model.handle(InputAction::Right);
+    CHECK_EQ(model.page(), GpsPage::Motion);
+    model.handle(InputAction::Right);
+    CHECK_EQ(model.page(), GpsPage::Position);
+
+    model.handle(InputAction::Tab);
+    CHECK_EQ(model.page(), GpsPage::Time);
+    model.handle(InputAction::Tab);
+    CHECK_EQ(model.page(), GpsPage::Receiver);
+    model.handle(InputAction::Tab);
+    CHECK_EQ(model.page(), GpsPage::Motion);
+    model.handle(InputAction::Tab);
+    CHECK_EQ(model.page(), GpsPage::Position);
 }
 
 TEST_CASE(gps_compass_points_cover_cardinal_and_intercardinal_directions) {
@@ -827,6 +860,7 @@ int main() {
     local_clock_rejects_unsynced_time_and_applies_utc_offset();
     weather_display_keeps_successful_data_when_inputs_disappear();
     gps_state_distinguishes_stream_search_fix_and_stale();
+    gps_page_navigation_wraps_across_all_four_pages();
     gps_compass_points_cover_cardinal_and_intercardinal_directions();
     gps_fix_quality_and_mode_have_readable_labels();
     single_host_policy_allows_pairing_only_without_a_stored_bond();

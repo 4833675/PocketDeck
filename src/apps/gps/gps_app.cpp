@@ -163,37 +163,74 @@ void drawReceiver(M5Canvas& canvas, const GpsSnapshot& gps) {
     canvas.drawString(line, config::kScreenWidth - 8, 98);
 }
 
+void drawMotion(M5Canvas& canvas, const GpsSnapshot& gps) {
+    const bool speedAvailable =
+        gps.speedValid && classifyGpsState(gps) == GpsState::Fix;
+    const bool courseAvailable =
+        gps.courseValid && classifyGpsState(gps) == GpsState::Fix;
+    char line[24];
+
+    canvas.setTextDatum(middle_center);
+    canvas.setTextColor(theme::kMuted, theme::kBackground);
+    canvas.drawString("SPEED", config::kScreenWidth / 2, 27);
+    canvas.setTextSize(3);
+    canvas.setTextColor(theme::kPrimary, theme::kBackground);
+    if (speedAvailable) {
+        std::snprintf(line, sizeof(line), "%.1f", gps.speedKph);
+    } else {
+        std::snprintf(line, sizeof(line), "--");
+    }
+    canvas.drawString(line, config::kScreenWidth / 2, 47);
+    canvas.setTextSize(1);
+    canvas.setTextColor(theme::kMuted, theme::kBackground);
+    canvas.drawString("KM/H", config::kScreenWidth / 2, 65);
+
+    canvas.drawString("COURSE", config::kScreenWidth / 2, 77);
+    canvas.setTextSize(3);
+    canvas.setTextColor(theme::kPrimary, theme::kBackground);
+    if (courseAvailable) {
+        std::snprintf(line, sizeof(line), "%.0f%s %s", gps.courseDegrees, "\xC2\xB0",
+                      gpsCompassPoint(gps.courseDegrees));
+    } else {
+        std::snprintf(line, sizeof(line), "--");
+    }
+    canvas.drawString(line, config::kScreenWidth / 2, 97);
+    canvas.setTextSize(1);
+    canvas.setTextColor(theme::kMuted, theme::kBackground);
+}
+
 }  // namespace
 
 void GpsApp::onEnter(SystemContext&) {
-    page_ = 0;
+    model_.reset();
 }
 
 void GpsApp::onExit(SystemContext&) {}
 void GpsApp::update(uint32_t, SystemContext&) {}
 
 void GpsApp::onInput(const InputEvent& event, SystemContext& context) {
-    if (event.action == InputAction::Left) {
-        page_ = static_cast<uint8_t>((page_ + 2) % 3);
-    } else if (event.action == InputAction::Right || event.action == InputAction::Tab) {
-        page_ = static_cast<uint8_t>((page_ + 1) % 3);
-    } else if (event.action == InputAction::Back) {
+    if (event.action == InputAction::Back) {
         context.requestApp(AppId::Launcher);
+    } else {
+        model_.handle(event.action);
     }
 }
 
 void GpsApp::render(Display& display, const SystemContext& context) {
     const GpsSnapshot gps = context.gps != nullptr ? context.gps->snapshot() : GpsSnapshot{};
+    const GpsPage page = model_.page();
     char title[10];
-    std::snprintf(title, sizeof(title), "GPS %u/3", static_cast<unsigned>(page_ + 1));
+    std::snprintf(title, sizeof(title), "GPS %u/4", static_cast<unsigned>(page) + 1);
     drawStatusBar(display, makeStatusBarData(title, context));
     auto& canvas = display.canvas();
-    if (page_ == 0) {
+    if (page == GpsPage::Position) {
         drawPosition(canvas, gps);
-    } else if (page_ == 1) {
+    } else if (page == GpsPage::Time) {
         drawMotionAndTime(canvas, gps);
-    } else {
+    } else if (page == GpsPage::Receiver) {
         drawReceiver(canvas, gps);
+    } else {
+        drawMotion(canvas, gps);
     }
     drawHint(canvas);
 }

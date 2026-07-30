@@ -1,5 +1,6 @@
 #pragma once
 
+#include "apps/gps/gps_app_model.h"
 #include "core/app.h"
 
 namespace pd {
@@ -15,7 +16,7 @@ public:
     void render(Display& display, const SystemContext& context) override;
 
 private:
-    uint8_t page_ = 0;
+    GpsAppModel model_;
 };
 
 }  // namespace pd
