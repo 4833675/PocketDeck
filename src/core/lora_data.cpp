@@ -33,20 +33,24 @@ const char* loraMessageDirectionLabel(LoRaMessageDirection direction) {
 }
 
 bool LoRaData::appendDraft(char character) {
-    if (!isPrintableAscii(character) || draftFull()) return false;
+    if (state_ == LoRaRadioState::Transmitting || !isPrintableAscii(character) ||
+        draftFull()) {
+        return false;
+    }
     draft_[draftLength_++] = character;
     draft_[draftLength_] = '\0';
     return true;
 }
 
 bool LoRaData::eraseDraft() {
-    if (draftEmpty()) return false;
+    if (state_ == LoRaRadioState::Transmitting || draftEmpty()) return false;
     --draftLength_;
     draft_[draftLength_] = '\0';
     return true;
 }
 
 void LoRaData::clearDraft() {
+    if (state_ == LoRaRadioState::Transmitting) return;
     draftLength_ = 0;
     draft_[0] = '\0';
 }
@@ -90,8 +94,8 @@ bool LoRaData::completeTransmit(int16_t statusCode) {
     appendHistory(LoRaMessageDirection::Tx,
                   reinterpret_cast<const uint8_t*>(draft_.data()), draftLength_, false);
     ++counters_.sent;
-    clearDraft();
     state_ = LoRaRadioState::Listening;
+    clearDraft();
     return true;
 }
 

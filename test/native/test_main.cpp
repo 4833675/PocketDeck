@@ -721,6 +721,26 @@ TEST_CASE(lora_send_requires_a_listening_nonempty_draft_and_records_exact_tx) {
     CHECK_STR_EQ(model.historyAt(0).text.data(), "TX");
 }
 
+TEST_CASE(lora_transmitting_draft_is_immutable_until_completion) {
+    LoRaData model;
+    model.beginListening();
+    CHECK(model.appendDraft('O'));
+    CHECK(model.appendDraft('K'));
+
+    std::array<uint8_t, kLoRaPayloadLimit> transmitted{};
+    CHECK_EQ(model.copyDraft(transmitted.data(), transmitted.size()), 2u);
+    CHECK(model.beginTransmit());
+    CHECK(!model.appendDraft('!'));
+    CHECK(!model.eraseDraft());
+    model.clearDraft();
+    CHECK_EQ(model.copyDraft(transmitted.data(), transmitted.size()), 2u);
+    CHECK_EQ(transmitted[0], static_cast<uint8_t>('O'));
+    CHECK_EQ(transmitted[1], static_cast<uint8_t>('K'));
+    CHECK(model.completeTransmit(0));
+    CHECK_STR_EQ(model.historyAt(0).text.data(), "OK");
+    CHECK(model.draftEmpty());
+}
+
 TEST_CASE(lora_history_evicts_oldest_and_has_readable_direction_labels) {
     LoRaData model;
     model.beginListening();
@@ -829,6 +849,7 @@ int main() {
     settings_factory_reset_requires_its_own_confirmation();
     lora_draft_accepts_printable_ascii_and_copies_exact_payload();
     lora_send_requires_a_listening_nonempty_draft_and_records_exact_tx();
+    lora_transmitting_draft_is_immutable_until_completion();
     lora_history_evicts_oldest_and_has_readable_direction_labels();
     lora_rx_sanitizes_payload_rejects_oversize_and_tracks_quality();
     lora_state_transitions_cover_crc_restart_and_persistent_error();
