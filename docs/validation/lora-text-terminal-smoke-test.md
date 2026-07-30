@@ -46,7 +46,7 @@ of 868.0 MHz and +22 dBm is permitted at the test location before transmitting.
 
 | Check | Command | Expected evidence | Result | Notes |
 |---|---|---|---|---|
-| Native model tests | `scripts/test-native.sh` | LoRa payload, state, history, and GPS navigation checks pass | Pass | 771 checks; native only, not RF evidence |
+| Native model tests | `scripts/test-native.sh` | LoRa payload, state, history, and GPS navigation checks pass | Pass | 798 checks; native only, not RF evidence |
 | Firmware build | `pio run -e cardputer-adv` | RadioLib 7.7.1 compiles for Cardputer Adv | Pass | Clean build; not hardware evidence |
 | Whitespace | `git diff --check` | No whitespace errors | Pass | Task 5 validation run |
 
