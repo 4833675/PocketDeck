@@ -3,6 +3,7 @@
 #include <array>
 #include <cstdint>
 
+#include "core/wifi_recovery_policy.h"
 #include "core/wifi_profiles.h"
 
 namespace pd {
@@ -43,8 +44,13 @@ struct WifiSnapshot {
     int32_t rssi = -127;
     int16_t lastStatus = 0;
     int16_t lastScanResult = 0;
+    uint8_t lastDisconnectReason = 0;
     uint32_t connectedForMs = 0;
     uint32_t scanGeneration = 0;
+    uint32_t disconnectGeneration = 0;
+    uint32_t lostIpGeneration = 0;
+    WifiRecoveryAction lastRecoveryAction = WifiRecoveryAction::None;
+    uint32_t recoveryGeneration = 0;
     int64_t utcEpoch = 0;
     std::array<WifiNetwork, kNetworkCapacity> networks{};
     uint8_t networkCount = 0;
@@ -54,5 +60,6 @@ struct WifiSnapshot {
 };
 
 const char* wifiStateLabel(WifiState state);
+const char* wifiDisconnectReasonLabel(uint8_t reason);
 
 }  // namespace pd

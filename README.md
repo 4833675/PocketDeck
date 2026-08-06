@@ -9,11 +9,16 @@ diagnostics.
 It is a from-scratch project, not a Claude Desktop Buddy fork, and it does not
 support the original Cardputer model.
 
-Current firmware: **0.8.0**
+Current firmware: **0.9.6**
 
 ## Features
 
 - Graphite Mint launcher, status bar, Quick Settings, and local system controls.
+- Exact-color 8-bit indexed back buffer, reserving about 31 KB more runtime heap
+  than RGB565 for RSA-backed SSH on the no-PSRAM device.
+- Runtime English / Simplified Chinese selection across all product UI,
+  persisted in NVS without external font files. Commands, addresses, filenames,
+  radio payloads, protocol metrics, and raw diagnostic events remain literal.
 - Secure BLE HID keyboard with one bonded Mac and a stable `Pocket Deck` identity.
 - Up to eight saved 2.4 GHz Wi-Fi networks with strongest-known selection and
   fallback.
@@ -253,6 +258,10 @@ wind, daily high/low, and sunrise/sunset from
 visible from RAM when GPS or Wi-Fi later disappears; fresh inputs are required
 only for the next update.
 
+The language selected in Settings also applies immediately to Weather states,
+conditions, measurements, cache status, hints, and common request errors.
+Temperatures, percentages, times, and units retain their technical notation.
+
 ## GPS / GNSS
 
 Attach the optional Cap LoRa-1262 and open GPS. Pocket Deck reads its NMEA stream
@@ -267,6 +276,10 @@ Use Left/Right or Tab across four pages:
    sentence counts.
 4. Large speed in `KM/H` and course in degrees plus compass point. A stale or
    invalid motion field displays `--`.
+
+The language selected in Settings applies to all four GPS pages immediately.
+Coordinates, units, `HDOP`, UART pins, and NMEA diagnostics remain recognizable
+technical values in either language.
 
 `RX CHARS` rising proves bytes are arriving; `CHECKSUM OK` rising proves valid
 NMEA. A valid stream can still show `SEARCHING` until the ceramic antenna has a
@@ -393,6 +406,14 @@ from diagnostics.
   `~/.ssh/id_rsa`.
 - **SSH authentication fails:** add the matching public key to the remote
   account's `authorized_keys`, then verify the on-device username and port.
+- **SSH connection times out:** `HOST KEY CHECK: OFF` is a security status, not
+  the failure. Confirm the Cardputer's Wi-Fi can reach the server port directly;
+  unlike the Mac, it does not inherit a VPN/TUN route. A transport failure stops
+  for manual Enter rather than retrying indefinitely, because repeated pre-auth
+  disconnects may trigger modern OpenSSH per-source penalties.
+- **SSH reports out of memory:** use firmware 0.9.6 or later and the repository's
+  Cardputer build flags. They combine the indexed display buffer, `aes128-ctr`,
+  and 1,024-byte libssh socket reads for the no-PSRAM heap.
 - **Early serial output is missing:** native USB re-enumerates after reset; use
   on-device diagnostics or TF logs for boot history.
 - **Incremental build acts stale:** run `pio run -e cardputer-adv -t clean`, then

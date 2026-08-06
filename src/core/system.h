@@ -95,6 +95,9 @@ private:
     WifiState lastWifiState_ = WifiState::Disabled;
     bool lastWifiStateValid_ = false;
     uint32_t lastWifiScanGeneration_ = 0;
+    uint32_t lastWifiDisconnectGeneration_ = 0;
+    uint32_t lastWifiLostIpGeneration_ = 0;
+    uint32_t lastWifiRecoveryGeneration_ = 0;
     WeatherState lastWeatherState_ = WeatherState::Idle;
     bool lastWeatherStateValid_ = false;
     std::array<char, 48> serialCommandBuffer_{};

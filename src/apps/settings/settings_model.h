@@ -41,6 +41,7 @@ enum class SettingsEffect : uint8_t {
     ToggleBluetooth,
     DisconnectBluetooth,
     ForgetHost,
+    ToggleLanguage,
     MountStorage,
     FormatStorage,
     Restart,

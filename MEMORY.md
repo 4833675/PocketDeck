@@ -1,6 +1,6 @@
 # Pocket Deck project memory
 
-Last updated: 2026-07-30
+Last updated: 2026-08-06
 
 This is the current handoff for the Pocket Deck repository. Read it with
 `AGENTS.md`; use `README.md` for public usage instructions.
@@ -8,23 +8,14 @@ This is the current handoff for the Pocket Deck repository. Read it with
 ## Current state
 
 - Repository: `https://github.com/4833675/PocketDeck`, branch `main`.
-- Current integration is `v0.8.0`: foreground resource profiles now isolate
-  BLE, Wi-Fi, GPS, LoRa, and MEDIA logging in addition to the existing shell,
-  SSH, GPS, LoRa, hierarchical Chinese MP3 player, weather, and diagnostics.
-- The previous `v0.5.0` image was flashed without clearing NVS. Real-device validation
-  reached `CONNECTING -> AUTHENTICATING -> OPENING SHELL -> CONNECTED` against a
-  public-key-only server; host creation also survived repeated uploads/restarts.
-  Terminal typing, controls, scrollback, and reconnect scenarios remain pending.
-- Integrated automated validation: `scripts/test-native.sh` passed 943 checks;
-  `pio run -e cardputer-adv` used 90,840 / 327,680 bytes RAM (27.7%) and
-  2,083,045 / 3,145,728 bytes flash (66.2%).
+- Current `v0.9.6` localizes all product UI and adds deterministic SSH heap headroom.
+- v0.9.6 reached a public-key shell over direct Wi-Fi on real hardware.
+- Automated validation passed 1,104 checks; the build used 90,952 bytes RAM
+  (27.8%) and 2,099,445 bytes flash (66.7%).
 - No LoRa Cap, antenna, RF, or two-endpoint hardware claim has been made.
 - A MEDIA `tracks=0` incident was traced from TF evidence to stale v0.6 firmware,
   whose scanner was non-recursive. v0.7.0 and then v0.7.1 were uploaded without
   clearing NVS; USB `HELP` confirmed the new `system.log` command path.
-- The TF card was still in the Mac reader, so `LOG STATUS` correctly reported
-  `mounted=0`. Hierarchical scan, Chinese rendering, playback, and persistent
-  v0.7.1 event logging remain pending after the card is inserted in the device.
 - Real-device logs confirmed BLE reconnect, successful Wi-Fi scans, and a manual
   Tab scan (`raw=29`, strongest 8 displayed). The one migrated saved SSID was
   not visible at the test location (`candidates=0`), which is expected.
@@ -34,10 +25,11 @@ This is the current handoff for the Pocket Deck repository. Read it with
 - v0.8.0 was uploaded without erasing NVS; USB `LOG STATUS` reported TF logging
   ready/mounted. MEDIA playback is now smooth and BLE Keyboard works after
   app-scoped suspend/resume, as confirmed on the real device.
-- Known unresolved issue: while remaining inside SSH, Weather, or Settings,
-  Wi-Fi may still cycle through disconnect/scan/reconnect. v0.8.0 prevents this
-  work outside Wi-Fi apps but does not fix the Wi-Fi state-machine root cause.
-- There is no build blocker.
+- v0.9.1 gives a dropped link a direct reconnect before profile scans, applies
+  2/5/15/30-second scan backoff, and logs driver disconnect/LOST_IP reasons;
+  real range-loss and long-running SSH/Weather validation remain pending.
+- v0.9.6 was uploaded without erasing NVS; TF logs recorded 85,380 bytes free
+  at SSH init and 41,240 at shell-ready. The owner confirmed the connection.
 
 ## Product identity
 
@@ -48,15 +40,15 @@ and must remain untouched unless explicitly selected.
 
 Current apps and services:
 
-- Graphite Mint launcher and status bar.
+- Runtime English / Chinese across every app, Settings, and Quick Settings.
 - Secure single-host BLE keyboard for macOS, implemented with NimBLE-Arduino
   1.4.3 and a six-digit display-only pairing flow.
-- Four-page GPS dashboard for the optional Cap LoRa-1262, including a motion-only
-  page with speed/course validity and stale-data handling.
+- Runtime English / Simplified Chinese four-page GPS dashboard for the optional
+  Cap LoRa-1262, including motion validity and stale-data handling.
 - Raw LoRa P2P text terminal for the Cap SX1262 and a matching RadioLib peer.
 - Foreground MEDIA player with four folder levels, 64 entries per current
   folder, Chinese filenames, ESP8266Audio 2.2.0, and speaker/AUX output.
-- Wi-Fi manager with eight profiles, NTP clock, and GPS-local Open-Meteo weather.
+- Wi-Fi manager with eight profiles, NTP clock, and bilingual GPS-local Open-Meteo weather.
 - Pocket SSH Terminal with six NVS host entries, one PTY shell, public-key auth,
   40×13 ANSI display, 64-line scrollback, reconnect, and quick commands.
 - Quick Settings, Preferences/NVS settings, on-device diagnostics, and unified
@@ -135,6 +127,11 @@ Current apps and services:
   use built-in `efontCN_14`; never log filenames or audio content.
 - MEDIA uses M5's 1,536-sample speaker buffers and renders at 10 Hz to reduce
   underruns. Recommend 128 kbps / 44.1 kHz; hardware confirmation is pending.
+- Runtime language uses one settings flag and compile-time literals. English
+  uses `Font0`; Chinese reuses the already-linked `efontCN_14`. Do not add a new
+  CJK font size or permanent language branch without a separate budget decision.
+- Every new product UI ships English and Chinese together unless technically impossible; document exceptions.
+- Preserve commands, protocols, user data, RF/GPS metrics, and raw logs when translation risks changing meaning.
 - TF logging normally closes each event so unexpected power loss does not strand
   a long buffered session. MEDIA uses a 12-event categorical deferred queue and
   flushes after its MP3 file closes. `system.log` rotates at 4 MB through three archives; legacy
@@ -146,14 +143,17 @@ Current apps and services:
 - SSH host-key verification is deliberately OFF in this prototype. Do not call
   it secure on untrusted networks; TOFU fingerprint storage is the next security
   step. Factory reset clears host records but cannot remove a compiled key.
+- SSH uses `aes128-ctr` and 1,024-byte libssh reads; handshake milestones stay in
+  RAM until failure. Only pending Wi-Fi auto-retries; other failures wait for Enter.
 - libssh runs in one lazy FreeRTOS worker with a 20,480-byte stack, 512-byte TX
   stream, and 1,024-byte RX stream. The generated private key is parsed once at
   task startup and cached for reconnects; parsing it after key exchange failed at
   the heap low-water point. Never call libssh directly from an app or log
   terminal input/output.
-- The validated shell-ready snapshot left about 15.3 KB free heap, a 7.7 KB
-  largest block, and 6.7 KB minimum task-stack margin. The former 51.2 KB stack
-  could not even be allocated; 32 KB ran but starved 3,072-bit RSA import/signing.
+- v0.9.2/v0.9.5 logs proved RSA auth was nondeterministic at 13.5 KB free heap.
+  v0.9.6's exact-color 8-bit indexed buffer recovers 31,632 runtime bytes without
+  shrinking the 20,480-byte SSH stack. Real hardware reached `CONNECTED` and
+  opened a shell with 41,240 bytes free and a 23,540-byte largest block.
 
 ## Standard workflow
 
@@ -172,26 +172,26 @@ Serial log commands: `HELP`, `LOG STATUS`, `LOG DUMP`, `LOG DUMP ALL`, and
 
 ## Near-term validation
 
-1. Run `resource-isolation-smoke-test.md` on v0.8.0; prioritize MEDIA
+1. Run `localization-smoke-test.md` on v0.9.6 across every app and Quick Settings.
+2. Run `resource-isolation-smoke-test.md`; prioritize MEDIA
    continuity, no Wi-Fi/BT work during playback, deferred-log flush, and bond/profile survival.
-2. Stay inside SSH or Weather for several minutes, capture state-change logs,
-   and diagnose the remaining Wi-Fi disconnect/scan/reconnect cycle.
-3. Run `docs/validation/lora-text-terminal-smoke-test.md` with antenna attached
+3. Stay inside SSH or Weather for several minutes and validate direct reconnect,
+   scan backoff, and the new disconnect/LOST_IP reason logs.
+4. Run `docs/validation/lora-text-terminal-smoke-test.md` with antenna attached
    and a matching second SX1262/RadioLib endpoint; all RF, shared-SPI, and
    regression rows remain pending until observed.
-4. Run the new GPS 4/4 moving, stationary, invalid, and stale-motion rows
+5. Run the new GPS 4/4 moving, stationary, invalid, and stale-motion rows
    outdoors without sharing precise coordinates.
-5. Continue `docs/validation/ssh-terminal-smoke-test.md` from terminal input,
-   control keys, quick commands, scrollback, disconnect, and reconnect checks.
-6. Recheck BLE, Wi-Fi, weather, GPS, heap, and UI responsiveness after the SSH
+6. Continue the SSH checklist with two more cold boots, then controls, scrollback, and reconnect.
+7. Recheck BLE, Wi-Fi, weather, GPS, heap, and UI responsiveness after the SSH
    worker has been created.
-7. Connect a second 2.4 GHz network and confirm both entries appear under Saved
+8. Connect a second 2.4 GHz network and confirm both entries appear under Saved
    networks and saved scan rows show `S`.
-8. Restart near each network separately and confirm automatic connection.
-9. Make both visible and confirm strongest-known selection; then make the first
+9. Restart near each network separately and confirm automatic connection.
+10. Make both visible and confirm strongest-known selection; then make the first
    candidate fail and confirm fallback.
-10. Delete one profile and verify the other survives restart.
-11. Recheck BLE typing/range-loss reconnect and confirm Wi-Fi scans occur only
+11. Delete one profile and verify the other survives restart.
+12. Recheck BLE typing/range-loss reconnect and confirm Wi-Fi scans occur only
     inside SSH, Weather, or Settings.
 
 Use the matching files in `docs/validation/` to record results. After the device

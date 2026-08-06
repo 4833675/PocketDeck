@@ -24,8 +24,11 @@ location.
   never replace a known-good profile.
 - Before scanning while disconnected, cancel any pending association and retry
   scan startup for a bounded four-second window while the driver settles.
-- At boot and after link loss, scan first, rank visible saved SSIDs by RSSI, and
-  try each candidate in order. If none are available, scan again after 15 seconds.
+- At boot, scan and rank visible saved SSIDs by RSSI. After link loss, allow a
+  two-second grace period, try the current profile directly, then fall back to
+  ranked scans with bounded 5/15/30-second backoff.
+- If a background scan completes after the existing link has recovered, discard
+  its results without disconnecting that link to start another candidate.
 - Keep scans asynchronous and use fixed-capacity arrays so BLE HID and rendering
   remain responsive and heap behavior stays predictable.
 - Expose only SSIDs in UI snapshots. Passwords remain inside the Wi-Fi service

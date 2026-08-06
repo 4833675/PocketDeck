@@ -5,12 +5,20 @@
 #include <cstring>
 #include <utility>
 
+#include "pocket_deck_config.h"
 #include "apps/launcher/launcher_model.h"
 #include "apps/gps/gps_app_model.h"
+#include "apps/gps/gps_app_text.h"
+#include "apps/keyboard/keyboard_app_text.h"
 #include "apps/lora/lora_app_model.h"
+#include "apps/lora/lora_app_text.h"
 #include "apps/media/media_app_model.h"
+#include "apps/media/media_app_text.h"
 #include "apps/settings/settings_model.h"
+#include "apps/settings/settings_app_text.h"
+#include "apps/weather/weather_app_text.h"
 #include "apps/ssh/ssh_app_model.h"
+#include "apps/ssh/ssh_app_text.h"
 #include "core/ble_keyboard_policy.h"
 #include "core/clock_data.h"
 #include "core/g0_gesture.h"
@@ -26,6 +34,8 @@
 #include "core/ssh_hosts.h"
 #include "core/ssh_host_record.h"
 #include "core/ssh_memory_budget.h"
+#include "core/ssh_retry_policy.h"
+#include "core/ssh_transport_profile.h"
 #include "core/system_settings.h"
 #include "core/system_context.h"
 #include "core/terminal_buffer.h"
@@ -34,8 +44,10 @@
 #include "core/weather_data.h"
 #include "core/wifi_data.h"
 #include "core/wifi_profiles.h"
+#include "core/wifi_recovery_policy.h"
 #include "services/diagnostics_service.h"
 #include "ui/quick_settings_model.h"
+#include "ui/theme.h"
 
 using namespace pd;
 
@@ -117,6 +129,30 @@ TEST_CASE(ssh_error_detail_stays_single_line_and_never_partially_copies_secret) 
     sanitizeSshErrorDetail("x private-hostname", "private-hostname", "",
                            shortOutput.data(), shortOutput.size());
     CHECK(std::strstr(shortOutput.data(), "private") == nullptr);
+}
+
+TEST_CASE(ssh_retry_waits_after_failure_not_after_attempt_start) {
+    SshRetryPolicy policy;
+    policy.noteFailure(8000);
+    CHECK_EQ(policy.secondsRemaining(8000), 5u);
+    CHECK(!policy.takeDue(12999));
+    CHECK(policy.takeDue(13000));
+    CHECK(!policy.takeDue(13001));
+}
+
+TEST_CASE(ssh_retry_is_cancelable_and_wrap_safe) {
+    SshRetryPolicy policy;
+    policy.noteFailure(1000);
+    policy.cancel();
+    CHECK(!policy.takeDue(100000));
+
+    policy.noteFailure(0xFFFFFF00u);
+    CHECK(!policy.takeDue(0x00001287u));
+    CHECK(policy.takeDue(0x00001288u));
+}
+
+TEST_CASE(ssh_transport_uses_the_low_memory_cipher_in_both_directions) {
+    CHECK_STR_EQ(ssh_transport::kCipher, "aes128-ctr");
 }
 
 TEST_CASE(plain_a) {
@@ -416,6 +452,7 @@ TEST_CASE(settings_defaults_are_valid) {
     CHECK(settings.keyClick);
     CHECK(!settings.wifiEnabled);
     CHECK(settings.bleEnabled);
+    CHECK_EQ(settings.language, UiLanguage::English);
     CHECK_STR_EQ(settings.deviceName.data(), "Pocket Deck");
     CHECK_STR_EQ(settings.hostLabel.data(), "Mac");
 }
@@ -434,14 +471,23 @@ TEST_CASE(settings_sanitizer_clamps_and_repairs) {
     settings.brightness = 255;
     settings.volume = 200;
     settings.sleepSeconds = 1;
+    settings.language = static_cast<UiLanguage>(99);
     settings.deviceName.fill('\0');
     settings.hostLabel.fill('X');
     const auto fixed = sanitizeSettings(settings);
     CHECK_EQ(fixed.brightness, 100);
     CHECK_EQ(fixed.volume, 100);
     CHECK_EQ(fixed.sleepSeconds, 15);
+    CHECK_EQ(fixed.language, UiLanguage::English);
     CHECK_STR_EQ(fixed.deviceName.data(), "Pocket Deck");
     CHECK_STR_EQ(fixed.hostLabel.data(), "Mac");
+}
+
+TEST_CASE(localization_switches_without_dynamic_storage) {
+    CHECK_STR_EQ(localized(UiLanguage::English, "Settings", "设置"), "Settings");
+    CHECK_STR_EQ(localized(UiLanguage::SimplifiedChinese, "Settings", "设置"), "设置");
+    CHECK_EQ(toggledUiLanguage(UiLanguage::English), UiLanguage::SimplifiedChinese);
+    CHECK_EQ(toggledUiLanguage(UiLanguage::SimplifiedChinese), UiLanguage::English);
 }
 
 TEST_CASE(launcher_starts_on_keyboard_and_wraps) {
@@ -487,10 +533,345 @@ TEST_CASE(wifi_and_weather_labels_cover_visible_states) {
     CHECK_STR_EQ(wifiStateLabel(WifiState::Disabled), "OFF");
     CHECK_STR_EQ(wifiStateLabel(WifiState::Scanning), "SCANNING");
     CHECK_STR_EQ(wifiStateLabel(WifiState::Connected), "CONNECTED");
+    CHECK_STR_EQ(wifiDisconnectReasonLabel(8), "ASSOC_LEAVE");
+    CHECK_STR_EQ(wifiDisconnectReasonLabel(200), "BEACON_TIMEOUT");
+    CHECK_STR_EQ(wifiDisconnectReasonLabel(201), "NO_AP_FOUND");
+    CHECK_STR_EQ(wifiDisconnectReasonLabel(255), "OTHER");
     CHECK_STR_EQ(weatherStateLabel(WeatherState::Fetching), "FETCHING");
     CHECK_STR_EQ(weatherCodeLabel(0), "CLEAR");
     CHECK_STR_EQ(weatherCodeLabel(61), "RAIN");
     CHECK_STR_EQ(weatherCodeLabel(95), "THUNDERSTORM");
+}
+
+TEST_CASE(weather_localized_text_covers_conditions_states_and_errors) {
+    CHECK_STR_EQ(localizedWeatherCodeLabel(0, UiLanguage::English), "CLEAR");
+    CHECK_STR_EQ(localizedWeatherCodeLabel(0, UiLanguage::SimplifiedChinese), "晴");
+    CHECK_STR_EQ(localizedWeatherCodeLabel(1, UiLanguage::SimplifiedChinese),
+                 "大部晴朗");
+    CHECK_STR_EQ(localizedWeatherCodeLabel(2, UiLanguage::SimplifiedChinese),
+                 "局部多云");
+    CHECK_STR_EQ(localizedWeatherCodeLabel(45, UiLanguage::SimplifiedChinese), "雾");
+    CHECK_STR_EQ(localizedWeatherCodeLabel(51, UiLanguage::SimplifiedChinese),
+                 "毛毛雨");
+    CHECK_STR_EQ(localizedWeatherCodeLabel(61, UiLanguage::SimplifiedChinese), "雨");
+    CHECK_STR_EQ(localizedWeatherCodeLabel(71, UiLanguage::SimplifiedChinese), "雪");
+    CHECK_STR_EQ(localizedWeatherCodeLabel(80, UiLanguage::SimplifiedChinese),
+                 "阵雨");
+    CHECK_STR_EQ(localizedWeatherCodeLabel(85, UiLanguage::SimplifiedChinese),
+                 "阵雪");
+    CHECK_STR_EQ(localizedWeatherCodeLabel(95, UiLanguage::SimplifiedChinese),
+                 "雷暴");
+    CHECK_STR_EQ(localizedWeatherCodeLabel(49, UiLanguage::SimplifiedChinese),
+                 "未知");
+
+    CHECK_STR_EQ(localizedWeatherDisplayLabel(WeatherDisplayState::Live,
+                                              UiLanguage::SimplifiedChinese),
+                 "实时");
+    CHECK_STR_EQ(localizedWeatherDisplayLabel(WeatherDisplayState::CachedNoGps,
+                                              UiLanguage::SimplifiedChinese),
+                 "缓存");
+    CHECK_STR_EQ(localizedWeatherDisplayLabel(WeatherDisplayState::WifiOff,
+                                              UiLanguage::SimplifiedChinese),
+                 "Wi-Fi 已关闭");
+    CHECK_STR_EQ(localizedWeatherDisplayLabel(WeatherDisplayState::WaitingGps,
+                                              UiLanguage::SimplifiedChinese),
+                 "等待 GPS 定位");
+    CHECK_STR_EQ(localizedWeatherDisplayLabel(WeatherDisplayState::Error,
+                                              UiLanguage::English),
+                 "WEATHER ERROR");
+    CHECK_STR_EQ(localizedWeatherWifiStateLabel(WifiState::Scanning,
+                                                UiLanguage::SimplifiedChinese),
+                 "正在扫描");
+    CHECK_STR_EQ(localizedWeatherWifiStateLabel(WifiState::Connecting,
+                                                UiLanguage::SimplifiedChinese),
+                 "正在连接");
+    CHECK_STR_EQ(localizedWeatherErrorLabel("Weather HTTP request failed",
+                                            UiLanguage::SimplifiedChinese),
+                 "天气请求失败");
+    CHECK_STR_EQ(localizedWeatherErrorLabel("custom detail",
+                                            UiLanguage::SimplifiedChinese),
+                 "custom detail");
+}
+
+TEST_CASE(keyboard_localized_text_covers_every_state_and_error) {
+    CHECK_STR_EQ(localizedKeyboardStateLabel(BleKeyboardState::Disabled,
+                                             UiLanguage::English),
+                 "BLUETOOTH OFF");
+    CHECK_STR_EQ(localizedKeyboardStateLabel(BleKeyboardState::Disabled,
+                                             UiLanguage::SimplifiedChinese),
+                 "蓝牙已关闭");
+    CHECK_STR_EQ(localizedKeyboardStateLabel(BleKeyboardState::Advertising,
+                                             UiLanguage::SimplifiedChinese),
+                 "等待 Mac");
+    CHECK_STR_EQ(localizedKeyboardStateLabel(BleKeyboardState::Pairing,
+                                             UiLanguage::SimplifiedChinese),
+                 "正在配对");
+    CHECK_STR_EQ(localizedKeyboardStateLabel(BleKeyboardState::Connected,
+                                             UiLanguage::SimplifiedChinese),
+                 "已连接");
+    CHECK_STR_EQ(localizedKeyboardStateLabel(BleKeyboardState::Error,
+                                             UiLanguage::SimplifiedChinese),
+                 "错误");
+
+    CHECK_STR_EQ(localizedKeyboardErrorLabel(BleKeyboardError::None,
+                                             UiLanguage::SimplifiedChinese),
+                 "无");
+    CHECK_STR_EQ(localizedKeyboardErrorLabel(BleKeyboardError::InitializationFailed,
+                                             UiLanguage::SimplifiedChinese),
+                 "初始化失败");
+    CHECK_STR_EQ(localizedKeyboardErrorLabel(BleKeyboardError::UnauthorizedPeer,
+                                             UiLanguage::SimplifiedChinese),
+                 "已拒绝未知主机");
+    CHECK_STR_EQ(localizedKeyboardErrorLabel(BleKeyboardError::AuthenticationFailed,
+                                             UiLanguage::SimplifiedChinese),
+                 "认证失败");
+    CHECK_STR_EQ(localizedKeyboardErrorLabel(BleKeyboardError::BondOperationFailed,
+                                             UiLanguage::SimplifiedChinese),
+                 "配对记录操作失败");
+}
+
+TEST_CASE(ssh_localized_text_covers_every_state_and_error) {
+    CHECK_STR_EQ(localizedSshStateLabel(SshState::Idle, UiLanguage::English), "READY");
+    CHECK_STR_EQ(localizedSshStateLabel(SshState::Idle, UiLanguage::SimplifiedChinese),
+                 "就绪");
+    CHECK_STR_EQ(localizedSshStateLabel(SshState::Connecting,
+                                       UiLanguage::SimplifiedChinese),
+                 "正在连接");
+    CHECK_STR_EQ(localizedSshStateLabel(SshState::Authenticating,
+                                       UiLanguage::SimplifiedChinese),
+                 "正在认证");
+    CHECK_STR_EQ(localizedSshStateLabel(SshState::OpeningShell,
+                                       UiLanguage::SimplifiedChinese),
+                 "正在打开终端");
+    CHECK_STR_EQ(localizedSshStateLabel(SshState::Connected,
+                                       UiLanguage::SimplifiedChinese),
+                 "已连接");
+    CHECK_STR_EQ(localizedSshStateLabel(SshState::Disconnected,
+                                       UiLanguage::SimplifiedChinese),
+                 "已断开");
+    CHECK_STR_EQ(localizedSshStateLabel(SshState::Error,
+                                       UiLanguage::SimplifiedChinese),
+                 "错误");
+
+    CHECK_STR_EQ(localizedSshErrorLabel(SshError::None, UiLanguage::SimplifiedChinese),
+                 "无");
+    CHECK_STR_EQ(localizedSshErrorLabel(SshError::NoPrivateKey,
+                                       UiLanguage::SimplifiedChinese),
+                 "缺少 SSH 私钥");
+    CHECK_STR_EQ(localizedSshErrorLabel(SshError::NoNetwork,
+                                       UiLanguage::SimplifiedChinese),
+                 "Wi-Fi 未连接");
+    CHECK_STR_EQ(localizedSshErrorLabel(SshError::ServiceUnavailable,
+                                       UiLanguage::SimplifiedChinese),
+                 "SSH 服务不可用");
+    CHECK_STR_EQ(localizedSshErrorLabel(SshError::QueueFull,
+                                       UiLanguage::SimplifiedChinese),
+                 "SSH 命令队列已满");
+    CHECK_STR_EQ(localizedSshErrorLabel(SshError::SessionCreate,
+                                       UiLanguage::SimplifiedChinese),
+                 "无法创建会话");
+    CHECK_STR_EQ(localizedSshErrorLabel(SshError::Configure,
+                                       UiLanguage::SimplifiedChinese),
+                 "会话配置失败");
+    CHECK_STR_EQ(localizedSshErrorLabel(SshError::Connect,
+                                       UiLanguage::SimplifiedChinese),
+                 "连接失败");
+    CHECK_STR_EQ(localizedSshErrorLabel(SshError::KeyImport,
+                                       UiLanguage::SimplifiedChinese),
+                 "私钥导入失败");
+    CHECK_STR_EQ(localizedSshErrorLabel(SshError::Authentication,
+                                       UiLanguage::SimplifiedChinese),
+                 "公钥认证失败");
+    CHECK_STR_EQ(localizedSshErrorLabel(SshError::ChannelCreate,
+                                       UiLanguage::SimplifiedChinese),
+                 "无法创建通道");
+    CHECK_STR_EQ(localizedSshErrorLabel(SshError::ChannelOpen,
+                                       UiLanguage::SimplifiedChinese),
+                 "无法打开通道");
+    CHECK_STR_EQ(localizedSshErrorLabel(SshError::Pty,
+                                       UiLanguage::SimplifiedChinese),
+                 "PTY 请求失败");
+    CHECK_STR_EQ(localizedSshErrorLabel(SshError::Shell,
+                                       UiLanguage::SimplifiedChinese),
+                 "Shell 请求失败");
+    CHECK_STR_EQ(localizedSshErrorLabel(SshError::RemoteClosed,
+                                       UiLanguage::SimplifiedChinese),
+                 "远程终端已关闭");
+    CHECK_STR_EQ(localizedSshErrorLabel(SshError::Write,
+                                       UiLanguage::SimplifiedChinese),
+                 "终端写入失败");
+}
+
+TEST_CASE(lora_localized_text_covers_every_radio_state) {
+    CHECK_STR_EQ(localizedLoRaStateLabel(LoRaRadioState::Unavailable,
+                                        UiLanguage::English),
+                 "RADIO NOT FOUND");
+    CHECK_STR_EQ(localizedLoRaStateLabel(LoRaRadioState::Unavailable,
+                                        UiLanguage::SimplifiedChinese),
+                 "未发现无线电");
+    CHECK_STR_EQ(localizedLoRaStateLabel(LoRaRadioState::Initializing,
+                                        UiLanguage::SimplifiedChinese),
+                 "正在启动");
+    CHECK_STR_EQ(localizedLoRaStateLabel(LoRaRadioState::Listening,
+                                        UiLanguage::SimplifiedChinese),
+                 "正在监听");
+    CHECK_STR_EQ(localizedLoRaStateLabel(LoRaRadioState::Transmitting,
+                                        UiLanguage::SimplifiedChinese),
+                 "发送中");
+    CHECK_STR_EQ(localizedLoRaStateLabel(LoRaRadioState::Error,
+                                        UiLanguage::SimplifiedChinese),
+                 "错误");
+}
+
+TEST_CASE(media_localized_text_covers_states_known_details_and_passthrough) {
+    CHECK_STR_EQ(localizedMediaStateLabel(MediaPlaybackState::NoCard,
+                                         UiLanguage::English),
+                 "NO TF CARD");
+    CHECK_STR_EQ(localizedMediaStateLabel(MediaPlaybackState::NoCard,
+                                         UiLanguage::SimplifiedChinese),
+                 "未检测到 TF 卡");
+    CHECK_STR_EQ(localizedMediaStateLabel(MediaPlaybackState::Empty,
+                                         UiLanguage::SimplifiedChinese),
+                 "没有 MP3 文件");
+    CHECK_STR_EQ(localizedMediaStateLabel(MediaPlaybackState::Ready,
+                                         UiLanguage::SimplifiedChinese),
+                 "就绪");
+    CHECK_STR_EQ(localizedMediaStateLabel(MediaPlaybackState::Playing,
+                                         UiLanguage::SimplifiedChinese),
+                 "播放中");
+    CHECK_STR_EQ(localizedMediaStateLabel(MediaPlaybackState::Paused,
+                                         UiLanguage::SimplifiedChinese),
+                 "已暂停");
+    CHECK_STR_EQ(localizedMediaStateLabel(MediaPlaybackState::Error,
+                                         UiLanguage::SimplifiedChinese),
+                 "媒体错误");
+
+    CHECK_STR_EQ(localizedMediaDetailLabel("MOUNT TF IN SETTINGS",
+                                          UiLanguage::SimplifiedChinese),
+                 "请在设置中挂载 TF 卡");
+    CHECK_STR_EQ(localizedMediaDetailLabel("COULD NOT CREATE /Music",
+                                          UiLanguage::SimplifiedChinese),
+                 "无法创建 /Music");
+    CHECK_STR_EQ(localizedMediaDetailLabel("COULD NOT OPEN FOLDER",
+                                          UiLanguage::SimplifiedChinese),
+                 "无法打开文件夹");
+    CHECK_STR_EQ(localizedMediaDetailLabel("COPY MP3 TO /Music",
+                                          UiLanguage::SimplifiedChinese),
+                 "请将 MP3 放入 /Music");
+    CHECK_STR_EQ(localizedMediaDetailLabel("EMPTY FOLDER",
+                                          UiLanguage::SimplifiedChinese),
+                 "文件夹为空");
+    CHECK_STR_EQ(localizedMediaDetailLabel("SHOWING FIRST 64",
+                                          UiLanguage::SimplifiedChinese),
+                 "仅显示前 64 项");
+    CHECK_STR_EQ(localizedMediaDetailLabel("MP3 DECODE FAILED",
+                                          UiLanguage::SimplifiedChinese),
+                 "MP3 解码失败");
+    CHECK_STR_EQ(localizedMediaDetailLabel("NEXT TRACK FAILED",
+                                          UiLanguage::SimplifiedChinese),
+                 "下一首播放失败");
+    CHECK_STR_EQ(localizedMediaDetailLabel("OUT OF MEMORY",
+                                          UiLanguage::SimplifiedChinese),
+                 "内存不足");
+    CHECK_STR_EQ(localizedMediaDetailLabel("COULD NOT OPEN MP3",
+                                          UiLanguage::SimplifiedChinese),
+                 "无法打开 MP3");
+    CHECK_STR_EQ(localizedMediaDetailLabel("MP3 START FAILED",
+                                          UiLanguage::SimplifiedChinese),
+                 "MP3 启动失败");
+    CHECK_STR_EQ(localizedMediaDetailLabel("SERVICE UNAVAILABLE",
+                                          UiLanguage::SimplifiedChinese),
+                 "媒体服务不可用");
+    CHECK_STR_EQ(localizedMediaDetailLabel("future detail",
+                                          UiLanguage::SimplifiedChinese),
+                 "future detail");
+}
+
+TEST_CASE(settings_localized_text_covers_reset_and_storage_failures) {
+    CHECK_STR_EQ(localizedResetReasonLabel("power-on", UiLanguage::English), "power-on");
+    CHECK_STR_EQ(localizedResetReasonLabel("power-on", UiLanguage::SimplifiedChinese),
+                 "上电");
+    CHECK_STR_EQ(localizedResetReasonLabel("external", UiLanguage::SimplifiedChinese),
+                 "外部复位");
+    CHECK_STR_EQ(localizedResetReasonLabel("software", UiLanguage::SimplifiedChinese),
+                 "软件重启");
+    CHECK_STR_EQ(localizedResetReasonLabel("panic", UiLanguage::SimplifiedChinese),
+                 "崩溃");
+    CHECK_STR_EQ(localizedResetReasonLabel("interrupt-wdt", UiLanguage::SimplifiedChinese),
+                 "中断看门狗");
+    CHECK_STR_EQ(localizedResetReasonLabel("task-wdt", UiLanguage::SimplifiedChinese),
+                 "任务看门狗");
+    CHECK_STR_EQ(localizedResetReasonLabel("watchdog", UiLanguage::SimplifiedChinese),
+                 "看门狗");
+    CHECK_STR_EQ(localizedResetReasonLabel("deep-sleep", UiLanguage::SimplifiedChinese),
+                 "深度睡眠唤醒");
+    CHECK_STR_EQ(localizedResetReasonLabel("brownout", UiLanguage::SimplifiedChinese),
+                 "电压过低");
+    CHECK_STR_EQ(localizedResetReasonLabel("sdio", UiLanguage::SimplifiedChinese), "SDIO");
+    CHECK_STR_EQ(localizedResetReasonLabel("unknown", UiLanguage::SimplifiedChinese),
+                 "未知");
+    CHECK_STR_EQ(localizedResetReasonLabel("other", UiLanguage::SimplifiedChinese),
+                 "其他");
+
+    CHECK_STR_EQ(localizedStorageErrorLabel("SD init/format failed",
+                                           UiLanguage::SimplifiedChinese),
+                 "TF 初始化/格式化失败");
+    CHECK_STR_EQ(localizedStorageErrorLabel("SD SPI init failed",
+                                           UiLanguage::SimplifiedChinese),
+                 "TF SPI 初始化失败");
+    CHECK_STR_EQ(localizedStorageErrorLabel("No TF card detected",
+                                           UiLanguage::SimplifiedChinese),
+                 "未检测到 TF 卡");
+    CHECK_STR_EQ(localizedStorageErrorLabel("future storage error",
+                                           UiLanguage::SimplifiedChinese),
+                 "future storage error");
+}
+
+TEST_CASE(wifi_recovery_tries_the_existing_link_before_scanning) {
+    WifiRecoveryPolicy policy;
+    policy.noteLinkLost(1000);
+
+    CHECK_EQ(policy.takeDueAction(2999), WifiRecoveryAction::None);
+    CHECK_EQ(policy.takeDueAction(3000), WifiRecoveryAction::ReconnectLast);
+    CHECK_EQ(policy.takeDueAction(3001), WifiRecoveryAction::None);
+
+    policy.noteAttemptFailed(4000);
+    CHECK_EQ(policy.takeDueAction(8999), WifiRecoveryAction::None);
+    CHECK_EQ(policy.takeDueAction(9000), WifiRecoveryAction::ScanProfiles);
+}
+
+TEST_CASE(wifi_recovery_scan_backoff_is_bounded_and_wrap_safe) {
+    WifiRecoveryPolicy policy;
+    policy.noteScanFailed(1000);
+    CHECK_EQ(policy.takeDueAction(2999), WifiRecoveryAction::None);
+    CHECK_EQ(policy.takeDueAction(3000), WifiRecoveryAction::ScanProfiles);
+
+    policy.noteScanFailed(3000);
+    CHECK_EQ(policy.takeDueAction(7999), WifiRecoveryAction::None);
+    CHECK_EQ(policy.takeDueAction(8000), WifiRecoveryAction::ScanProfiles);
+
+    policy.noteScanFailed(8000);
+    CHECK_EQ(policy.takeDueAction(22999), WifiRecoveryAction::None);
+    CHECK_EQ(policy.takeDueAction(23000), WifiRecoveryAction::ScanProfiles);
+
+    policy.noteScanFailed(23000);
+    CHECK_EQ(policy.takeDueAction(52999), WifiRecoveryAction::None);
+    CHECK_EQ(policy.takeDueAction(53000), WifiRecoveryAction::ScanProfiles);
+
+    policy.noteScanFailed(0xFFFFFF00u);
+    CHECK_EQ(policy.takeDueAction(0x0000742Fu), WifiRecoveryAction::None);
+    CHECK_EQ(policy.takeDueAction(0x00007430u), WifiRecoveryAction::ScanProfiles);
+}
+
+TEST_CASE(wifi_recovery_success_cancels_pending_work) {
+    WifiRecoveryPolicy policy;
+    policy.noteLinkLost(1000);
+    policy.noteConnected();
+    CHECK_EQ(policy.takeDueAction(60000), WifiRecoveryAction::None);
+
+    policy.noteScanFailed(70000);
+    policy.reset();
+    CHECK_EQ(policy.takeDueAction(100000), WifiRecoveryAction::None);
 }
 
 TEST_CASE(wifi_profiles_keep_eight_recent_networks_without_exposing_passwords) {
@@ -623,6 +1004,36 @@ TEST_CASE(ssh_runtime_budget_fits_observed_cardputer_heap) {
     CHECK(ssh_memory::kTaskStackBytes <= observedLargestBlock);
     CHECK(ssh_memory::kTaskStackBytes >= observedPeakStackUse + minimumStackHeadroom);
     CHECK(startupAllocation + minimumSessionHeapReserve <= observedFreeHeap);
+}
+
+TEST_CASE(display_back_buffer_preserves_ssh_authentication_headroom) {
+    constexpr std::size_t rgb565Bytes =
+        static_cast<std::size_t>(config::kScreenWidth) * config::kScreenHeight * 2u;
+    constexpr std::size_t configuredBytes =
+        static_cast<std::size_t>(config::kScreenWidth) * config::kScreenHeight *
+            config::kDisplayColorDepth / 8u +
+        config::kDisplayPaletteBytes;
+    constexpr std::size_t minimumRecoveredHeap = 24u * 1024u;
+
+    CHECK_EQ(config::kDisplayColorDepth, 8u);
+    CHECK(rgb565Bytes > configuredBytes);
+    CHECK(rgb565Bytes - configuredBytes >= minimumRecoveredHeap);
+}
+
+TEST_CASE(indexed_display_palette_has_no_conflicting_color_indices) {
+    std::array<uint16_t, theme::kUiPalette.size() + theme::kAnsiPalette.size()> colors{};
+    std::size_t count = 0;
+    for (const uint16_t color : theme::kUiPalette) colors[count++] = color;
+    for (const uint16_t color : theme::kAnsiPalette) colors[count++] = color;
+
+    for (std::size_t left = 0; left < count; ++left) {
+        for (std::size_t right = left + 1; right < count; ++right) {
+            if ((colors[left] & 0xFFu) == (colors[right] & 0xFFu)) {
+                CHECK_EQ(colors[left], colors[right]);
+            }
+        }
+    }
+    CHECK_EQ(theme::kAnsiPalette[15], theme::kText);
 }
 
 TEST_CASE(terminal_buffer_writes_text_and_tracks_crlf_cursor) {
@@ -963,6 +1374,44 @@ TEST_CASE(gps_fix_quality_and_mode_have_readable_labels) {
     CHECK_STR_EQ(gpsFixModeLabel('N'), "NONE");
 }
 
+TEST_CASE(gps_localized_text_covers_states_compass_quality_and_mode) {
+    CHECK_STR_EQ(localizedGpsStateLabel(GpsState::Fix, UiLanguage::English), "FIX");
+    CHECK_STR_EQ(localizedGpsStateLabel(GpsState::NoData,
+                                       UiLanguage::SimplifiedChinese),
+                 "无数据");
+    CHECK_STR_EQ(localizedGpsStateLabel(GpsState::NoStream,
+                                       UiLanguage::SimplifiedChinese),
+                 "数据中断");
+    CHECK_STR_EQ(localizedGpsStateLabel(GpsState::Searching,
+                                       UiLanguage::SimplifiedChinese),
+                 "正在搜星");
+    CHECK_STR_EQ(localizedGpsStateLabel(GpsState::Stale,
+                                       UiLanguage::SimplifiedChinese),
+                 "定位过期");
+    CHECK_STR_EQ(localizedGpsStateLabel(GpsState::Fix,
+                                       UiLanguage::SimplifiedChinese),
+                 "已定位");
+
+    CHECK_STR_EQ(localizedGpsCompassPoint(45.0, UiLanguage::English), "NE");
+    CHECK_STR_EQ(localizedGpsCompassPoint(0.0, UiLanguage::SimplifiedChinese), "北");
+    CHECK_STR_EQ(localizedGpsCompassPoint(45.0, UiLanguage::SimplifiedChinese),
+                 "东北");
+    CHECK_STR_EQ(localizedGpsCompassPoint(225.0, UiLanguage::SimplifiedChinese),
+                 "西南");
+    CHECK_STR_EQ(localizedGpsCompassPoint(-90.0, UiLanguage::SimplifiedChinese),
+                 "西");
+
+    CHECK_STR_EQ(localizedGpsFixQualityLabel('4', UiLanguage::English), "RTK");
+    CHECK_STR_EQ(localizedGpsFixQualityLabel('5', UiLanguage::SimplifiedChinese),
+                 "浮点");
+    CHECK_STR_EQ(localizedGpsFixQualityLabel('8', UiLanguage::SimplifiedChinese),
+                 "模拟");
+    CHECK_STR_EQ(localizedGpsFixModeLabel('A', UiLanguage::SimplifiedChinese),
+                 "自主");
+    CHECK_STR_EQ(localizedGpsFixModeLabel('D', UiLanguage::SimplifiedChinese),
+                 "差分");
+}
+
 TEST_CASE(single_host_policy_allows_pairing_only_without_a_stored_bond) {
     CHECK(BleKeyboardPolicy::newPairingAllowed(false));
     CHECK(!BleKeyboardPolicy::newPairingAllowed(true));
@@ -1181,6 +1630,10 @@ TEST_CASE(settings_system_actions_and_diagnostics_are_reachable) {
     model.handle(InputAction::Down);
     model.handle(InputAction::Confirm);
     auto result = model.handle(InputAction::Confirm);
+    CHECK_EQ(result.effect, SettingsEffect::ToggleLanguage);
+    CHECK_EQ(model.page(), SettingsPage::System);
+    model.handle(InputAction::Down);
+    result = model.handle(InputAction::Confirm);
     CHECK_EQ(result.effect, SettingsEffect::None);
     CHECK_EQ(model.page(), SettingsPage::Diagnostics);
     model.handle(InputAction::Back);
@@ -1197,6 +1650,7 @@ TEST_CASE(settings_storage_mount_and_format_are_explicit) {
     model.handle(InputAction::Down);
     model.handle(InputAction::Down);
     model.handle(InputAction::Confirm);
+    model.handle(InputAction::Down);
     model.handle(InputAction::Down);
     auto result = model.handle(InputAction::Confirm);
     CHECK_EQ(result.effect, SettingsEffect::None);
@@ -1224,6 +1678,7 @@ TEST_CASE(settings_factory_reset_requires_its_own_confirmation) {
     model.handle(InputAction::Down);
     model.handle(InputAction::Down);
     model.handle(InputAction::Confirm);
+    model.handle(InputAction::Down);
     model.handle(InputAction::Down);
     model.handle(InputAction::Down);
     model.handle(InputAction::Down);
@@ -1606,6 +2061,9 @@ int main() {
     weather_and_media_profiles_have_explicit_tradeoffs();
     ssh_error_detail_redacts_endpoint_identity();
     ssh_error_detail_stays_single_line_and_never_partially_copies_secret();
+    ssh_retry_waits_after_failure_not_after_attempt_start();
+    ssh_retry_is_cancelable_and_wrap_safe();
+    ssh_transport_uses_the_low_memory_cipher_in_both_directions();
     plain_a();
     mac_modifiers();
     fn_navigation_and_escape();
@@ -1633,9 +2091,19 @@ int main() {
     settings_defaults_are_valid();
     settings_version_mismatch_returns_defaults();
     settings_sanitizer_clamps_and_repairs();
+    localization_switches_without_dynamic_storage();
     launcher_starts_on_keyboard_and_wraps();
     launcher_confirm_requests_selected_app();
     wifi_and_weather_labels_cover_visible_states();
+    weather_localized_text_covers_conditions_states_and_errors();
+    keyboard_localized_text_covers_every_state_and_error();
+    ssh_localized_text_covers_every_state_and_error();
+    lora_localized_text_covers_every_radio_state();
+    media_localized_text_covers_states_known_details_and_passthrough();
+    settings_localized_text_covers_reset_and_storage_failures();
+    wifi_recovery_tries_the_existing_link_before_scanning();
+    wifi_recovery_scan_backoff_is_bounded_and_wrap_safe();
+    wifi_recovery_success_cancels_pending_work();
     wifi_profiles_keep_eight_recent_networks_without_exposing_passwords();
     wifi_profiles_reject_empty_or_unterminated_credentials();
     ssh_hosts_keep_six_recent_endpoints();
@@ -1643,6 +2111,8 @@ int main() {
     ssh_hosts_support_edit_delete_and_recent_order();
     ssh_host_record_round_trips_and_rejects_corruption();
     ssh_runtime_budget_fits_observed_cardputer_heap();
+    display_back_buffer_preserves_ssh_authentication_headroom();
+    indexed_display_palette_has_no_conflicting_color_indices();
     terminal_buffer_writes_text_and_tracks_crlf_cursor();
     terminal_buffer_scrolls_and_exposes_local_history();
     terminal_buffer_handles_ansi_cursor_motion_and_line_erase();
@@ -1663,6 +2133,7 @@ int main() {
     gps_page_navigation_wraps_across_all_four_pages();
     gps_compass_points_cover_cardinal_and_intercardinal_directions();
     gps_fix_quality_and_mode_have_readable_labels();
+    gps_localized_text_covers_states_compass_quality_and_mode();
     single_host_policy_allows_pairing_only_without_a_stored_bond();
     ble_advertising_deadline_handles_millis_wraparound();
     ble_report_gate_sends_release_then_deduplicates();

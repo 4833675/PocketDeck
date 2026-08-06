@@ -3,13 +3,17 @@
 #include <cstdio>
 #include <cstring>
 
+#include "apps/media/media_app_text.h"
+#include "core/localization.h"
 #include "core/media_data.h"
 #include "core/system_context.h"
+#include "core/system_settings.h"
 #include "drivers/display.h"
 #include "pocket_deck_config.h"
 #include "services/diagnostics_service.h"
 #include "services/media_service.h"
 #include "services/sd_log_service.h"
+#include "ui/localized_font.h"
 #include "ui/status_bar.h"
 #include "ui/theme.h"
 
@@ -30,12 +34,15 @@ uint16_t mediaStateColor(MediaPlaybackState state) {
     }
 }
 
-void drawHint(M5Canvas& canvas, const char* text) {
+void drawHint(M5Canvas& canvas, UiLanguage language, const char* english,
+              const char* simplifiedChinese) {
     const int16_t y = config::kScreenHeight - theme::kHintHeight;
     canvas.fillRect(0, y, config::kScreenWidth, theme::kHintHeight, theme::kPanel);
+    setUiFont(canvas, language);
     canvas.setTextDatum(middle_center);
     canvas.setTextColor(theme::kMuted, theme::kPanel);
-    canvas.drawString(text, config::kScreenWidth / 2, y + theme::kHintHeight / 2);
+    canvas.drawString(localized(language, english, simplifiedChinese),
+                      config::kScreenWidth / 2, y + theme::kHintHeight / 2);
 }
 
 const char* directoryName(const char* path) {
@@ -44,17 +51,28 @@ const char* directoryName(const char* path) {
     return slash != nullptr && slash[1] != '\0' ? slash + 1 : path;
 }
 
-void drawEmptyState(M5Canvas& canvas, const MediaSnapshot& snapshot, bool atRoot) {
-    canvas.setFont(&fonts::Font0);
+void drawEmptyState(M5Canvas& canvas, const MediaSnapshot& snapshot, bool atRoot,
+                    UiLanguage language) {
+    setUiFont(canvas, language);
     canvas.setTextDatum(middle_center);
-    canvas.setTextSize(2);
+    if (!isSimplifiedChinese(language)) canvas.setTextSize(2);
     canvas.setTextColor(mediaStateColor(snapshot.state), theme::kBackground);
-    canvas.drawString(mediaPlaybackStateLabel(snapshot.state), config::kScreenWidth / 2, 50);
-    canvas.setTextSize(1);
+    canvas.drawString(localizedMediaStateLabel(snapshot.state, language),
+                      config::kScreenWidth / 2, 50);
+    setUiFont(canvas, language);
     canvas.setTextColor(theme::kMuted, theme::kBackground);
-    canvas.drawString(snapshot.detail[0] != '\0' ? snapshot.detail.data() : "TAB TO RESCAN",
+    const char* detail = snapshot.detail[0] != '\0'
+                             ? localizedMediaDetailLabel(snapshot.detail.data(), language)
+                             : localized(language, "TAB TO RESCAN", "按 TAB 重新扫描");
+    canvas.drawString(detail,
                       config::kScreenWidth / 2, 77);
-    drawHint(canvas, atRoot ? "TAB RESCAN   DEL HOME" : "TAB RESCAN   DEL UP   G0 HOME");
+    if (atRoot) {
+        drawHint(canvas, language, "TAB RESCAN   DEL HOME",
+                 "TAB 重扫   DEL 主页");
+    } else {
+        drawHint(canvas, language, "TAB RESCAN   DEL UP   G0 HOME",
+                 "TAB 重扫   DEL 上级   G0 主页");
+    }
 }
 
 void formatElapsed(uint32_t elapsedMs, char* output, std::size_t capacity) {
@@ -154,20 +172,24 @@ void MediaApp::update(uint32_t, SystemContext& context) {
 }
 
 void MediaApp::render(Display& display, const SystemContext& context) {
-    drawStatusBar(display, makeStatusBarData("MEDIA", context));
+    const UiLanguage language = context.settings != nullptr
+                                    ? context.settings->language
+                                    : UiLanguage::English;
+    drawStatusBar(display, makeStatusBarData(
+                               localized(language, "MEDIA", "媒体"), context));
     auto& canvas = display.canvas();
     if (context.media == nullptr) {
         MediaSnapshot unavailable;
         unavailable.state = MediaPlaybackState::Error;
         std::snprintf(unavailable.detail.data(), unavailable.detail.size(), "SERVICE UNAVAILABLE");
-        drawEmptyState(canvas, unavailable, true);
+        drawEmptyState(canvas, unavailable, true, language);
         return;
     }
 
     const MediaSnapshot snapshot = context.media->snapshot(context.uptimeMs);
     const MediaLibrary& library = context.media->library();
     if (library.empty()) {
-        drawEmptyState(canvas, snapshot, context.media->atRootDirectory());
+        drawEmptyState(canvas, snapshot, context.media->atRootDirectory(), language);
         return;
     }
 
@@ -224,26 +246,43 @@ void MediaApp::render(Display& display, const SystemContext& context) {
 
     char elapsed[8]{};
     formatElapsed(snapshot.elapsedMs, elapsed, sizeof(elapsed));
-    char status[48]{};
+    char status[80]{};
     if ((snapshot.state == MediaPlaybackState::Error ||
          snapshot.state == MediaPlaybackState::Empty) && snapshot.detail[0] != '\0') {
-        std::snprintf(status, sizeof(status), "%s", snapshot.detail.data());
+        std::snprintf(status, sizeof(status), "%s",
+                      localizedMediaDetailLabel(snapshot.detail.data(), language));
         canvas.setTextColor(mediaStateColor(snapshot.state), theme::kBackground);
     } else if (snapshot.state == MediaPlaybackState::Ready) {
-        std::snprintf(status, sizeof(status), "READY   VOL %u",
-                      static_cast<unsigned>(context.volumePercent));
+        if (isSimplifiedChinese(language)) {
+            std::snprintf(status, sizeof(status), "就绪   音量 %u",
+                          static_cast<unsigned>(context.volumePercent));
+        } else {
+            std::snprintf(status, sizeof(status), "READY   VOL %u",
+                          static_cast<unsigned>(context.volumePercent));
+        }
         canvas.setTextColor(theme::kMuted, theme::kBackground);
     } else {
-        std::snprintf(status, sizeof(status), "%s   %3u%%   VOL %u", elapsed,
-                      static_cast<unsigned>(snapshot.progressPercent),
-                      static_cast<unsigned>(context.volumePercent));
+        if (isSimplifiedChinese(language)) {
+            std::snprintf(status, sizeof(status), "%s   %3u%%   音量 %u", elapsed,
+                          static_cast<unsigned>(snapshot.progressPercent),
+                          static_cast<unsigned>(context.volumePercent));
+        } else {
+            std::snprintf(status, sizeof(status), "%s   %3u%%   VOL %u", elapsed,
+                          static_cast<unsigned>(snapshot.progressPercent),
+                          static_cast<unsigned>(context.volumePercent));
+        }
         canvas.setTextColor(theme::kMuted, theme::kBackground);
     }
+    setFontForText(canvas, status);
     canvas.setTextDatum(top_left);
     canvas.drawString(status, 6, 105);
-    drawHint(canvas, context.media->atRootDirectory()
-                         ? "ENTER OPEN/PLAY  DEL HOME  -/+ VOL"
-                         : "ENTER OPEN/PLAY  DEL UP  G0 HOME");
+    if (context.media->atRootDirectory()) {
+        drawHint(canvas, language, "ENTER OPEN/PLAY  DEL HOME  -/+ VOL",
+                 "ENTER 打开/播放  DEL 主页  -/+ 音量");
+    } else {
+        drawHint(canvas, language, "ENTER OPEN/PLAY  DEL UP  G0 HOME",
+                 "ENTER 打开/播放  DEL 上级  G0 主页");
+    }
 }
 
 void MediaApp::scan(SystemContext& context, bool resetToRoot) {

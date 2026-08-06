@@ -2,6 +2,7 @@
 
 #include <cstdint>
 
+#include "core/localization.h"
 #include "ui/quick_settings_model.h"
 
 namespace pd {
@@ -15,7 +16,8 @@ public:
     QuickSettingsResult close() { return model_.close(); }
     bool active() const { return model_.active(); }
     const QuickSettingsValues& values() const { return model_.values(); }
-    void render(Display& display, uint8_t batteryPercent) const;
+    void render(Display& display, uint8_t batteryPercent,
+                UiLanguage language) const;
 
 private:
     QuickSettingsModel model_;

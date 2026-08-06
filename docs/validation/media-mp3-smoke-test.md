@@ -1,6 +1,6 @@
 # Pocket Deck MEDIA MP3 Hardware Smoke Test
 
-Target firmware: `0.8.0` on M5Stack Cardputer Adv.
+Target firmware: `0.9.6` on M5Stack Cardputer Adv.
 
 Use short disposable MP3 files under `/Music`. Do not record filenames in this
 checklist or diagnostics. Never format the TF card as part of this checklist.
@@ -25,3 +25,4 @@ checklist or diagnostics. Never format the TF card as part of this checklist.
 | MEDIA-15 | Open/close an SSH shell, then start MEDIA | Plays or shows `OUT OF MEMORY` cleanly; no reset or hang | Pending | |
 | MEDIA-16 | Play 128 kbps / 44.1 kHz MP3 while the UI updates | Continuous audio with no periodic underrun or display freeze | Pending | |
 | PRIV-MEDIA-01 | Inspect serial and TF diagnostics | No track filename or audio content is logged | Pending | |
+| LOCAL-MEDIA-01 | Switch English / Chinese and revisit no-card, empty, ready, playing, paused, and known-error screens | Product state, details, volume, and footers switch language; filenames, paths, elapsed time, and progress remain literal and readable | Pending | |

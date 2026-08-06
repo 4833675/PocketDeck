@@ -5,6 +5,7 @@
 #include "core/system_context.h"
 #include "drivers/display.h"
 #include "pocket_deck_config.h"
+#include "ui/localized_font.h"
 #include "ui/theme.h"
 
 namespace pd {
@@ -37,9 +38,12 @@ StatusBarData makeStatusBarData(const char* title, const SystemContext& context)
 void drawStatusBar(Display& display, const StatusBarData& data) {
     auto& canvas = display.canvas();
     canvas.fillRect(0, 0, config::kScreenWidth, theme::kStatusHeight, theme::kPanel);
+    setFontForText(canvas, data.title);
     canvas.setTextColor(theme::kPrimary, theme::kPanel);
     canvas.setTextDatum(middle_left);
     canvas.drawString(data.title, 6, theme::kStatusHeight / 2);
+
+    setTechnicalFont(canvas);
 
     char battery[8];
     std::snprintf(battery, sizeof(battery), "%u%%",

@@ -51,6 +51,15 @@ bool WifiService::begin(bool enabled) {
     // one of our known-good profiles.
     WiFi.persistent(false);
     WiFi.setAutoReconnect(false);
+    WiFi.onEvent(
+        [this](WiFiEvent_t, WiFiEventInfo_t info) {
+            pendingDisconnectReason_.store(info.wifi_sta_disconnected.reason);
+            driverDisconnectEvents_.fetch_add(1);
+        },
+        WiFiEvent_t::ARDUINO_EVENT_WIFI_STA_DISCONNECTED);
+    WiFi.onEvent(
+        [this](WiFiEvent_t, WiFiEventInfo_t) { driverLostIpEvents_.fetch_add(1); },
+        WiFiEvent_t::ARDUINO_EVENT_WIFI_STA_LOST_IP);
     initialized_ = true;
     runtimeStateApplied_ = false;
     setEnabled(enabled);
@@ -89,9 +98,11 @@ void WifiService::stopRuntime(uint32_t nowMs) {
     candidateConnection_ = false;
     candidateCount_ = 0;
     candidatePosition_ = 0;
-    nextAutoScanAtMs_ = 0;
     snapshot_.autoCandidateCount = 0;
     clearPendingCredentials();
+    directReconnectActive_ = false;
+    directReconnectStartedMs_ = 0;
+    recoveryPolicy_.reset();
 
     esp_wifi_scan_stop();
     WiFi.scanDelete();
@@ -116,9 +127,11 @@ void WifiService::startRuntime(uint32_t nowMs) {
     candidateConnection_ = false;
     candidateCount_ = 0;
     candidatePosition_ = 0;
-    nextAutoScanAtMs_ = 0;
     snapshot_.autoCandidateCount = 0;
     clearPendingCredentials();
+    directReconnectActive_ = false;
+    directReconnectStartedMs_ = 0;
+    recoveryPolicy_.reset();
 
     WiFi.mode(WIFI_STA);
     WiFi.setAutoReconnect(false);
@@ -151,6 +164,7 @@ bool WifiService::connect(const char* ssid, const char* password) {
                                   (password == nullptr || password[0] == '\0');
     const char* selectedPassword = useSavedPassword ? saved->password.data()
                                                      : (password != nullptr ? password : "");
+    recoveryPolicy_.reset();
     return beginConnection(ssid, selectedPassword, !useSavedPassword, false, millis());
 }
 
@@ -176,8 +190,10 @@ bool WifiService::forgetNetwork(const char* ssid) {
         candidateConnection_ = false;
         candidateCount_ = 0;
         candidatePosition_ = 0;
-        nextAutoScanAtMs_ = 0;
         clearPendingCredentials();
+        directReconnectActive_ = false;
+        directReconnectStartedMs_ = 0;
+        recoveryPolicy_.reset();
         if (runtimeRunning_) WiFi.disconnect(false, false);
         if (profiles_.empty()) clearLegacyStationConfig();
         wasConnected_ = false;
@@ -187,13 +203,14 @@ bool WifiService::forgetNetwork(const char* ssid) {
             setState(WifiState::Disabled, millis());
         } else {
             setState(WifiState::Idle, millis());
-            if (!profiles_.empty()) scheduleAutoScan(millis(), 300);
+            if (!profiles_.empty()) requestScan(ScanPurpose::AutoConnect, millis());
         }
     }
     return stored;
 }
 
 void WifiService::update(uint32_t nowMs) {
+    drainDriverEvents();
     if (!runtimeRunning_) return;
 
     snapshot_.lastStatus = static_cast<int16_t>(WiFi.status());
@@ -205,6 +222,8 @@ void WifiService::update(uint32_t nowMs) {
                 requestTimeSync();
             }
             wasConnected_ = true;
+            directReconnectActive_ = false;
+            recoveryPolicy_.noteConnected();
             refreshLinkDetails(nowMs);
         }
         return;
@@ -217,6 +236,8 @@ void WifiService::update(uint32_t nowMs) {
             requestTimeSync();
         }
         wasConnected_ = true;
+        directReconnectActive_ = false;
+        recoveryPolicy_.noteConnected();
         if (connectionActive_) completeConnection(nowMs);
         setState(WifiState::Connected, nowMs);
         refreshLinkDetails(nowMs);
@@ -235,8 +256,19 @@ void WifiService::update(uint32_t nowMs) {
         timeRequested_ = false;
         connectionActive_ = false;
         clearPendingCredentials();
+        directReconnectActive_ = false;
+        directReconnectStartedMs_ = 0;
+        recoveryPolicy_.noteLinkLost(nowMs);
+        setState(WifiState::Connecting, nowMs);
+    }
+
+    if (directReconnectActive_ &&
+        nowMs - directReconnectStartedMs_ >= kDirectReconnectTimeoutMs) {
+        directReconnectActive_ = false;
+        directReconnectStartedMs_ = 0;
+        WiFi.disconnect(false, false);
+        recoveryPolicy_.noteAttemptFailed(nowMs);
         setState(WifiState::Idle, nowMs);
-        scheduleAutoScan(nowMs, 500);
     }
 
     if (connectionActive_ && snapshot_.state == WifiState::Connecting) {
@@ -247,12 +279,7 @@ void WifiService::update(uint32_t nowMs) {
             return;
         }
     }
-
-    if (!connectionActive_ && !profiles_.empty() && nextAutoScanAtMs_ != 0 &&
-        static_cast<int32_t>(nowMs - nextAutoScanAtMs_) >= 0) {
-        nextAutoScanAtMs_ = 0;
-        requestScan(ScanPurpose::AutoConnect, nowMs);
-    }
+    processRecovery(nowMs);
 }
 
 void WifiService::importLegacyProfile() {
@@ -297,6 +324,9 @@ void WifiService::syncSavedNetworks() {
 
 void WifiService::requestScan(ScanPurpose purpose, uint32_t nowMs) {
     if (!runtimeRunning_) return;
+    if (purpose == ScanPurpose::User) recoveryPolicy_.reset();
+    directReconnectActive_ = false;
+    directReconnectStartedMs_ = 0;
     esp_wifi_scan_stop();
     WiFi.scanDelete();
     scanPurpose_ = purpose;
@@ -357,7 +387,11 @@ void WifiService::processScan(uint32_t nowMs) {
 void WifiService::completeScan(int16_t count, uint32_t nowMs) {
     collectScanResults(count);
     const ScanPurpose completedPurpose = scanPurpose_;
-    if (completedPurpose == ScanPurpose::AutoConnect) buildCandidates(count);
+    const bool recoveredDuringScan = completedPurpose == ScanPurpose::AutoConnect &&
+                                     WiFi.status() == WL_CONNECTED;
+    if (completedPurpose == ScanPurpose::AutoConnect && !recoveredDuringScan) {
+        buildCandidates(count);
+    }
     WiFi.scanDelete();
     scanStartPending_ = false;
     scanActive_ = false;
@@ -366,9 +400,21 @@ void WifiService::completeScan(int16_t count, uint32_t nowMs) {
     scanPurpose_ = ScanPurpose::None;
 
     if (completedPurpose == ScanPurpose::AutoConnect) {
+        if (recoveredDuringScan) {
+            if (!wasConnected_) {
+                connectedAtMs_ = nowMs;
+                requestTimeSync();
+            }
+            wasConnected_ = true;
+            directReconnectActive_ = false;
+            recoveryPolicy_.noteConnected();
+            setState(WifiState::Connected, nowMs);
+            refreshLinkDetails(nowMs);
+            return;
+        }
         if (beginNextCandidate(nowMs)) return;
         setState(WifiState::Idle, nowMs);
-        scheduleAutoScan(nowMs, kDisconnectedScanIntervalMs);
+        recoveryPolicy_.noteScanFailed(nowMs);
         return;
     }
 
@@ -387,7 +433,7 @@ void WifiService::failScan(uint32_t nowMs) {
     scanPurpose_ = ScanPurpose::None;
     setState(WifiState::Error, nowMs);
     if (failedPurpose == ScanPurpose::AutoConnect && !profiles_.empty()) {
-        scheduleAutoScan(nowMs, kDisconnectedScanIntervalMs);
+        recoveryPolicy_.noteScanFailed(nowMs);
     }
 }
 
@@ -507,6 +553,8 @@ bool WifiService::beginConnection(const char* ssid, const char* password,
     scanStartPending_ = false;
     scanActive_ = false;
     scanPurpose_ = ScanPurpose::None;
+    directReconnectActive_ = false;
+    directReconnectStartedMs_ = 0;
     WiFi.mode(WIFI_STA);
     WiFi.setAutoReconnect(false);
     WiFi.disconnect(false, false);
@@ -525,7 +573,12 @@ bool WifiService::beginConnection(const char* ssid, const char* password,
     const wl_status_t result = WiFi.begin(ssid, password);
     snapshot_.lastStatus = static_cast<int16_t>(result);
     setState(WifiState::Connecting, nowMs);
-    return result != WL_CONNECT_FAILED;
+    if (result != WL_CONNECT_FAILED) return true;
+
+    connectionActive_ = false;
+    candidateConnection_ = false;
+    clearPendingCredentials();
+    return false;
 }
 
 void WifiService::completeConnection(uint32_t) {
@@ -544,8 +597,8 @@ void WifiService::completeConnection(uint32_t) {
     candidateConnection_ = false;
     candidateCount_ = 0;
     candidatePosition_ = 0;
-    nextAutoScanAtMs_ = 0;
     clearPendingCredentials();
+    recoveryPolicy_.noteConnected();
 }
 
 void WifiService::failConnection(uint32_t nowMs) {
@@ -558,7 +611,7 @@ void WifiService::failConnection(uint32_t nowMs) {
 
     if (tryAnother && beginNextCandidate(nowMs)) return;
     setState(tryAnother ? WifiState::Idle : WifiState::Error, nowMs);
-    if (!profiles_.empty()) scheduleAutoScan(nowMs, kDisconnectedScanIntervalMs);
+    if (!profiles_.empty()) recoveryPolicy_.noteScanFailed(nowMs);
 }
 
 void WifiService::clearPendingCredentials() {
@@ -567,12 +620,51 @@ void WifiService::clearPendingCredentials() {
     saveOnConnect_ = false;
 }
 
-void WifiService::scheduleAutoScan(uint32_t nowMs, uint32_t delayMs) {
-    if (!runtimeRunning_) {
-        nextAutoScanAtMs_ = 0;
+void WifiService::drainDriverEvents() {
+    const uint32_t disconnectEvents = driverDisconnectEvents_.load();
+    if (disconnectEvents != observedDisconnectEvents_) {
+        observedDisconnectEvents_ = disconnectEvents;
+        snapshot_.lastDisconnectReason = pendingDisconnectReason_.load();
+        snapshot_.disconnectGeneration = disconnectEvents;
+    }
+    const uint32_t lostIpEvents = driverLostIpEvents_.load();
+    if (lostIpEvents != observedLostIpEvents_) {
+        observedLostIpEvents_ = lostIpEvents;
+        snapshot_.lostIpGeneration = lostIpEvents;
+    }
+}
+
+void WifiService::processRecovery(uint32_t nowMs) {
+    if (!runtimeRunning_ || connectionActive_ || scanStartPending_ || scanActive_ ||
+        snapshot_.state == WifiState::Scanning || profiles_.empty()) {
         return;
     }
-    nextAutoScanAtMs_ = nowMs + delayMs;
+
+    const WifiRecoveryAction action = recoveryPolicy_.takeDueAction(nowMs);
+    if (action == WifiRecoveryAction::None) return;
+    recordRecoveryAction(action);
+
+    if (action == WifiRecoveryAction::ReconnectLast) {
+        if (snapshot_.ssid[0] == '\0' || profiles_.find(snapshot_.ssid.data()) == nullptr) {
+            recoveryPolicy_.noteAttemptFailed(nowMs);
+            setState(WifiState::Idle, nowMs);
+            return;
+        }
+        WiFi.setAutoReconnect(false);
+        directReconnectActive_ = WiFi.reconnect();
+        directReconnectStartedMs_ = directReconnectActive_ ? nowMs : 0;
+        snapshot_.lastStatus = static_cast<int16_t>(WiFi.status());
+        setState(directReconnectActive_ ? WifiState::Connecting : WifiState::Idle, nowMs);
+        if (!directReconnectActive_) recoveryPolicy_.noteAttemptFailed(nowMs);
+        return;
+    }
+
+    requestScan(ScanPurpose::AutoConnect, nowMs);
+}
+
+void WifiService::recordRecoveryAction(WifiRecoveryAction action) {
+    snapshot_.lastRecoveryAction = action;
+    ++snapshot_.recoveryGeneration;
 }
 
 void WifiService::refreshLinkDetails(uint32_t nowMs) {

@@ -10,48 +10,12 @@
 #include <freertos/stream_buffer.h>
 #include <freertos/task.h>
 
+#include "core/ssh_data.h"
 #include "core/ssh_hosts.h"
 
 namespace pd {
 
 class DiagnosticsService;
-
-enum class SshState : uint8_t {
-    Idle,
-    Connecting,
-    Authenticating,
-    OpeningShell,
-    Connected,
-    Disconnected,
-    Error,
-};
-
-enum class SshError : uint8_t {
-    None,
-    NoPrivateKey,
-    NoNetwork,
-    ServiceUnavailable,
-    QueueFull,
-    SessionCreate,
-    Configure,
-    Connect,
-    KeyImport,
-    Authentication,
-    ChannelCreate,
-    ChannelOpen,
-    Pty,
-    Shell,
-    RemoteClosed,
-    Write,
-};
-
-struct SshSnapshot {
-    SshState state = SshState::Idle;
-    SshError error = SshError::None;
-    bool keyAvailable = false;
-    uint32_t generation = 0;
-    uint32_t droppedBytes = 0;
-};
 
 const char* sshStateLabel(SshState state);
 const char* sshErrorLabel(SshError error);
@@ -73,6 +37,7 @@ private:
     };
 
     static void taskEntry(void* context);
+    static void connectStatusCallback(void* context, float status);
     void taskLoop();
     bool establish(const SshHost& host, void* privateKey, void*& session, void*& channel);
     void setState(SshState state, SshError error = SshError::None);
@@ -86,6 +51,7 @@ private:
     TaskHandle_t task_ = nullptr;
     SshSnapshot snapshot_{};
     std::array<char, 120> lastConnectDetail_{};
+    uint8_t lastConnectStage_ = 0;
 };
 
 }  // namespace pd

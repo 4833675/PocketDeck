@@ -67,6 +67,11 @@ pio device monitor -e cardputer-adv
   through `SystemContext`; they should not manipulate radio or storage drivers.
 - Prefer fixed-capacity arrays and explicit state machines over unbounded heap
   allocation or blocking loops.
+- Every new product-owned user-visible feature must ship English and Simplified
+  Chinese in the same change, using the persisted runtime `UiLanguage` setting.
+  Preserve commands, protocols, user data, and raw logs when translation would
+  change meaning or compatibility. Deviate only when technically impossible,
+  and document the reason and user-visible limitation.
 
 ## Security and privacy invariants
 

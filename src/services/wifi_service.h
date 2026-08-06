@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <atomic>
 #include <cstdint>
 
 #include "core/wifi_data.h"
@@ -36,7 +37,7 @@ private:
     static constexpr uint32_t kScanStartTimeoutMs = 4000;
     static constexpr uint32_t kScanCompleteTimeoutMs = 15000;
     static constexpr uint32_t kScanRetryMs = 250;
-    static constexpr uint32_t kDisconnectedScanIntervalMs = 15000;
+    static constexpr uint32_t kDirectReconnectTimeoutMs = 8000;
 
     void importLegacyProfile();
     bool persistProfiles();
@@ -53,7 +54,9 @@ private:
     void completeConnection(uint32_t nowMs);
     void failConnection(uint32_t nowMs);
     void clearPendingCredentials();
-    void scheduleAutoScan(uint32_t nowMs, uint32_t delayMs);
+    void drainDriverEvents();
+    void processRecovery(uint32_t nowMs);
+    void recordRecoveryAction(WifiRecoveryAction action);
     void refreshLinkDetails(uint32_t nowMs);
     void applyRuntimeState(uint32_t nowMs);
     void startRuntime(uint32_t nowMs);
@@ -70,7 +73,6 @@ private:
     bool scanActive_ = false;
     uint32_t scanRequestedAtMs_ = 0;
     uint32_t scanRetryAtMs_ = 0;
-    uint32_t nextAutoScanAtMs_ = 0;
     std::array<uint8_t, kWifiProfileCapacity> candidates_{};
     uint8_t candidateCount_ = 0;
     uint8_t candidatePosition_ = 0;
@@ -81,13 +83,21 @@ private:
     std::array<char, kWifiPasswordCapacity> pendingPassword_{};
     uint32_t stateSinceMs_ = 0;
     uint32_t connectedAtMs_ = 0;
+    uint32_t directReconnectStartedMs_ = 0;
     bool timeRequested_ = false;
     bool wasConnected_ = false;
+    bool directReconnectActive_ = false;
     bool initialized_ = false;
     bool active_ = true;
     bool runtimeRunning_ = false;
     bool runtimeStateApplied_ = false;
     bool legacyImportAttempted_ = false;
+    WifiRecoveryPolicy recoveryPolicy_;
+    std::atomic<uint8_t> pendingDisconnectReason_{0};
+    std::atomic<uint32_t> driverDisconnectEvents_{0};
+    std::atomic<uint32_t> driverLostIpEvents_{0};
+    uint32_t observedDisconnectEvents_ = 0;
+    uint32_t observedLostIpEvents_ = 0;
 };
 
 }  // namespace pd

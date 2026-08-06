@@ -1,6 +1,6 @@
 # Pocket Deck GPS Hardware Smoke Test
 
-Target firmware: `0.4.0` or later
+Target firmware: `0.9.3` or later
 
 Hardware: M5Stack Cardputer Adv + Cap LoRa-1262
 
@@ -28,6 +28,8 @@ rows outdoors with the Cap's ceramic GNSS antenna facing open sky.
 | GPS-15 | BLE coexistence | Keyboard pairs/types normally while GPS receives in background | Pending | |
 | GPS-16 | Missing stream | Disconnect Cap and restart; GPS reports `NO DATA`, system remains usable | Pending | |
 | GPS-17 | Stream interruption | Disconnect after data reception; state changes to `NO STREAM` | Pending | |
+| GPS-18 | Simplified Chinese | Select Chinese and inspect all four pages. | Titles, states, labels, fix metadata, hints, and compass points are Chinese without clipping or missing glyphs; technical values remain readable. | Pending | |
+| GPS-19 | Runtime language switch | Switch between Chinese and English, then revisit all four pages and restart once. | GPS changes immediately, returns fully to English, and follows the persisted language after restart. | Pending | |
 
 Record the page-3 `RX CHARS`, `CHECKSUM OK`, and `CHECKSUM ERR` values whenever
 reporting a GPS problem. Do not include precise coordinates in shared logs unless

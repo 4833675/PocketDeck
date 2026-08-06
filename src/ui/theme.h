@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cstdint>
 
 namespace pd::theme {
@@ -21,8 +22,31 @@ inline constexpr uint16_t kBorder = rgb565(60, 76, 89);
 inline constexpr uint16_t kWarning = rgb565(255, 190, 103);
 inline constexpr uint16_t kError = rgb565(255, 112, 112);
 
+inline constexpr std::array<uint16_t, 10> kUiPalette{
+    kBackground, kPanel, kPanelRaised, kPrimary, kSecondary,
+    kText,       kMuted, kBorder,      kWarning, kError,
+};
+
+inline constexpr std::array<uint16_t, 16> kAnsiPalette{
+    kBackground,
+    rgb565(205, 76, 76),
+    rgb565(65, 171, 93),
+    rgb565(196, 164, 72),
+    rgb565(73, 130, 201),
+    rgb565(166, 94, 196),
+    rgb565(72, 170, 180),
+    kText,
+    rgb565(92, 108, 119),
+    kError,
+    rgb565(111, 224, 143),
+    rgb565(255, 211, 110),
+    rgb565(112, 171, 255),
+    rgb565(211, 145, 255),
+    rgb565(100, 222, 225),
+    kText,
+};
+
 inline constexpr int16_t kStatusHeight = 16;
 inline constexpr int16_t kHintHeight = 16;
 
 }  // namespace pd::theme
-

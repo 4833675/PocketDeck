@@ -5,9 +5,11 @@
 namespace pd::config {
 
 inline constexpr char kProductName[] = "Pocket Deck";
-inline constexpr char kFirmwareVersion[] = "0.8.0";
+inline constexpr char kFirmwareVersion[] = "0.9.6";
 inline constexpr int16_t kScreenWidth = 240;
 inline constexpr int16_t kScreenHeight = 135;
+inline constexpr uint8_t kDisplayColorDepth = 8;
+inline constexpr uint16_t kDisplayPaletteBytes = 256u * 3u;
 inline constexpr uint32_t kSerialBaud = 115200;
 inline constexpr uint32_t kG0LongPressMs = 600;
 inline constexpr uint8_t kDefaultBrightness = 78;

@@ -3,6 +3,8 @@
 #include <array>
 #include <cstdint>
 
+#include "core/localization.h"
+
 namespace pd {
 
 struct SystemSettings {
@@ -16,6 +18,7 @@ struct SystemSettings {
     bool keyClick = true;
     bool wifiEnabled = false;
     bool bleEnabled = true;
+    UiLanguage language = UiLanguage::English;
     std::array<char, kNameCapacity> deviceName{};
     std::array<char, kNameCapacity> hostLabel{};
 
@@ -25,4 +28,3 @@ struct SystemSettings {
 SystemSettings sanitizeSettings(SystemSettings settings);
 
 }  // namespace pd
-

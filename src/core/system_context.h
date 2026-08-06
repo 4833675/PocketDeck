@@ -37,6 +37,7 @@ enum class SystemCommand : uint8_t {
     ToggleBluetooth,
     DisconnectBluetooth,
     ForgetHost,
+    ToggleLanguage,
     MountStorage,
     FormatStorage,
     AdjustVolume,

@@ -8,8 +8,19 @@ namespace pd {
 Display::Display() : canvas_(&M5Cardputer.Display) {}
 
 bool Display::begin() {
-    canvas_.setColorDepth(16);
+    static_assert(config::kDisplayColorDepth == 8,
+                  "palette setup assumes an 8-bit back buffer");
+    canvas_.setColorDepth(lgfx::color_depth_t::palette_8bit);
     if (canvas_.createSprite(config::kScreenWidth, config::kScreenHeight) == nullptr) return false;
+    for (uint16_t index = 0; index < 256; ++index) {
+        canvas_.setPaletteColor(index, theme::kBackground);
+    }
+    for (const uint16_t color : theme::kUiPalette) {
+        canvas_.setPaletteColor(color & 0xFFu, color);
+    }
+    for (const uint16_t color : theme::kAnsiPalette) {
+        canvas_.setPaletteColor(color & 0xFFu, color);
+    }
     canvas_.setTextFont(1);
     canvas_.setTextWrap(false);
     return true;
@@ -27,4 +38,3 @@ void Display::endFrame() {
 }
 
 }  // namespace pd
-

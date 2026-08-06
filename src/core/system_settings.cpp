@@ -39,6 +39,7 @@ SystemSettings sanitizeSettings(SystemSettings settings) {
     settings.volume = std::min<uint8_t>(settings.volume, 100);
     if (settings.sleepSeconds < 15) settings.sleepSeconds = 15;
     if (settings.sleepSeconds > 3600) settings.sleepSeconds = 3600;
+    if (!validUiLanguage(settings.language)) settings.language = UiLanguage::English;
     if (!validText(settings.deviceName)) copyText(settings.deviceName, "Pocket Deck");
     if (!validText(settings.hostLabel)) copyText(settings.hostLabel, "Mac");
     return settings;

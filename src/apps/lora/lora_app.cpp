@@ -2,11 +2,15 @@
 
 #include <cstdio>
 
+#include "apps/lora/lora_app_text.h"
 #include "core/lora_data.h"
+#include "core/localization.h"
 #include "core/system_context.h"
+#include "core/system_settings.h"
 #include "drivers/display.h"
 #include "pocket_deck_config.h"
 #include "services/lora_service.h"
+#include "ui/localized_font.h"
 #include "ui/status_bar.h"
 #include "ui/theme.h"
 
@@ -36,32 +40,27 @@ uint16_t stateColor(LoRaRadioState state) {
     return theme::kMuted;
 }
 
-void formatState(const LoRaData& data, char* output, std::size_t capacity) {
-    switch (data.state()) {
-        case LoRaRadioState::Unavailable:
-            std::snprintf(output, capacity, "RADIO NOT FOUND");
-            return;
-        case LoRaRadioState::Initializing:
-            std::snprintf(output, capacity, "STARTING");
-            return;
-        case LoRaRadioState::Listening:
-            std::snprintf(output, capacity, "LISTENING");
-            return;
-        case LoRaRadioState::Transmitting:
-            std::snprintf(output, capacity, "BUSY");
-            return;
-        case LoRaRadioState::Error:
-            std::snprintf(output, capacity, "ERROR %d", data.lastStatusCode());
-            return;
+void formatState(const LoRaData& data, UiLanguage language, char* output,
+                 std::size_t capacity) {
+    if (data.state() == LoRaRadioState::Error) {
+        std::snprintf(output, capacity,
+                      isSimplifiedChinese(language) ? "错误 %d" : "ERROR %d",
+                      data.lastStatusCode());
+        return;
     }
+    std::snprintf(output, capacity, "%s",
+                  localizedLoRaStateLabel(data.state(), language));
 }
 
-void drawHint(M5Canvas& canvas) {
+void drawHint(M5Canvas& canvas, UiLanguage language) {
     const int16_t y = config::kScreenHeight - theme::kHintHeight;
     canvas.fillRect(0, y, config::kScreenWidth, theme::kHintHeight, theme::kPanel);
+    setUiFont(canvas, language);
     canvas.setTextDatum(middle_center);
     canvas.setTextColor(theme::kMuted, theme::kPanel);
-    canvas.drawString("ENTER SEND   FN+` HOME", config::kScreenWidth / 2,
+    canvas.drawString(localized(language, "ENTER SEND   FN+` HOME",
+                                "ENTER 发送   FN+` 主页"),
+                      config::kScreenWidth / 2,
                       y + theme::kHintHeight / 2);
 }
 
@@ -108,15 +107,21 @@ void LoRaApp::onInput(const InputEvent& event, SystemContext& context) {
 void LoRaApp::update(uint32_t, SystemContext&) {}
 
 void LoRaApp::render(Display& display, const SystemContext& context) {
-    drawStatusBar(display, makeStatusBarData("LORA", context));
+    const UiLanguage language = context.settings != nullptr
+                                    ? context.settings->language
+                                    : UiLanguage::English;
+    drawStatusBar(display, makeStatusBarData(
+                               localized(language, "LORA", "LoRa 通信"), context));
     auto& canvas = display.canvas();
-    canvas.setTextSize(1);
+    setTechnicalFont(canvas);
     canvas.setTextDatum(top_left);
 
     if (context.lora == nullptr) {
+        setUiFont(canvas, language);
         canvas.setTextColor(theme::kError, theme::kBackground);
-        canvas.drawString("RADIO NOT FOUND", 6, kProfileY);
-        drawHint(canvas);
+        canvas.drawString(localizedLoRaStateLabel(LoRaRadioState::Unavailable, language),
+                          6, kProfileY);
+        drawHint(canvas, language);
         return;
     }
 
@@ -124,13 +129,15 @@ void LoRaApp::render(Display& display, const SystemContext& context) {
     canvas.setTextColor(theme::kText, theme::kBackground);
     canvas.drawString("868.0 SF12", 6, kProfileY);
     char state[24]{};
-    formatState(data, state, sizeof(state));
+    formatState(data, language, state, sizeof(state));
+    setFontForText(canvas, state);
     canvas.setTextDatum(top_right);
     canvas.setTextColor(stateColor(data.state()), theme::kBackground);
     canvas.drawString(state, config::kScreenWidth - 6, kProfileY);
 
     const std::size_t historySize = data.historySize();
     const std::size_t firstSlot = kLoRaHistoryCapacity - historySize;
+    setTechnicalFont(canvas);
     canvas.setTextDatum(top_left);
     for (std::size_t index = 0; index < historySize; ++index) {
         const LoRaMessageRecord& record = data.historyAt(index);
@@ -151,22 +158,26 @@ void LoRaApp::render(Display& display, const SystemContext& context) {
                         theme::kBackground);
     char quality[40]{};
     if (sendRejected) {
-        std::snprintf(quality, sizeof(quality), "SEND REJECTED: BUSY");
+        std::snprintf(quality, sizeof(quality), "%s",
+                      localized(language, "SEND REJECTED: BUSY",
+                                "发送失败：无线电忙"));
     } else if (data.hasReceiveQuality()) {
         std::snprintf(quality, sizeof(quality), "RSSI %.1f dBm  SNR %.1f dB",
                       data.lastRssi(), data.lastSnr());
     } else {
         std::snprintf(quality, sizeof(quality), "RSSI --  SNR --");
     }
+    setFontForText(canvas, quality);
     canvas.drawString(quality, 6, kQualityY);
 
     canvas.fillRect(0, kDraftY - 2, config::kScreenWidth, 17, theme::kPanelRaised);
+    setTechnicalFont(canvas);
     canvas.setTextColor(theme::kText, theme::kPanelRaised);
     char draft[kVisibleDraftBytes + 3]{};
     std::snprintf(draft, sizeof(draft), "> %s",
                   visibleTail(data.draft(), data.draftLength(), kVisibleDraftBytes));
     canvas.drawString(draft, 6, kDraftY);
-    drawHint(canvas);
+    drawHint(canvas, language);
 }
 
 }  // namespace pd

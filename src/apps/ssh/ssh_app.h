@@ -3,6 +3,7 @@
 #include "apps/ssh/ssh_app_model.h"
 #include "core/app.h"
 #include "core/ssh_hosts.h"
+#include "core/ssh_retry_policy.h"
 #include "core/terminal_buffer.h"
 
 namespace pd {
@@ -33,7 +34,7 @@ private:
     bool hasActiveHost_ = false;
     bool storeError_ = false;
     uint32_t lastSshGeneration_ = 0;
-    uint32_t lastReconnectAttemptMs_ = 0;
+    SshRetryPolicy retryPolicy_;
 };
 
 }  // namespace pd

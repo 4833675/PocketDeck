@@ -38,8 +38,16 @@ local to the build machine and must never enter the public repository.
 - Reserve `Fn+Tab` for fixed quick commands and `Opt+Fn+Up/Down` for local
   scrollback. All other terminal keys are converted into byte sequences before
   entering the SSH transmit queue.
-- Disconnect when the SSH app exits. Automatically retry transient network,
-  remote-close, and write failures every five seconds while the app remains open.
+- Disconnect when the SSH app exits. Automatically retry only a connection made
+  before Wi-Fi became ready. Transport, remote-close, and write failures stop for
+  explicit Enter so a broken path cannot trigger OpenSSH per-source penalties.
+- Fix both transport directions to `aes128-ctr`; LibSSH-ESP32 otherwise prefers
+  AES-256-GCM, which exhausted contiguous heap during observed ESP32 key exchange.
+- Compile LibSSH-ESP32 with `MAX_BUF_SIZE=1024`. Its 4,096-byte socket allocation
+  can fail on fragmented no-PSRAM heap and is incorrectly reported upstream as EOF.
+- Track connection milestones in RAM and log the final stage only on failure;
+  synchronous TF writes during KEX/RSA authentication consume critical heap.
+  Never log endpoints, key material, terminal bytes, or submitted commands.
 - Temporarily skip SSH server host-key verification, as explicitly accepted for
   this single-owner prototype. Add TOFU fingerprint persistence before treating
   the terminal as safe on untrusted networks.
@@ -51,8 +59,10 @@ local to the build machine and must never enter the public repository.
 - Factory reset removes SSH host records but cannot remove a key compiled into
   the application image; replacing it requires rebuilding and reflashing.
 - The worker and queues are lazy. On the validated Cardputer Adv, a connected
-  shell left about 15 KB free heap, a 7.7 KB largest free block, and a 6.7 KB
-  task-stack high-water margin. There is no simultaneous second session.
+  shell previously operated at the edge of available heap. ADR-0007 moves the
+  frame buffer to an exact-color indexed palette, recovering about 31 KB of
+  runtime heap without shrinking the 6.7 KB task-stack high-water margin. There
+  is no simultaneous second session.
 - The first version intentionally omits SFTP, SCP UI, tunnels, agent forwarding,
   password authentication, custom quick commands, and full xterm/Unicode
   emulation.

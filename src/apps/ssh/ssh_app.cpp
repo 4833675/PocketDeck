@@ -5,57 +5,44 @@
 #include <cstdio>
 #include <cstring>
 
+#include "apps/ssh/ssh_app_text.h"
+#include "core/localization.h"
 #include "core/system_context.h"
+#include "core/system_settings.h"
 #include "core/terminal_input.h"
 #include "drivers/display.h"
 #include "pocket_deck_config.h"
 #include "services/diagnostics_service.h"
 #include "services/ssh_host_store.h"
 #include "services/ssh_service.h"
+#include "ui/localized_font.h"
 #include "ui/status_bar.h"
 #include "ui/theme.h"
 
 namespace pd {
 namespace {
 
-constexpr uint32_t kReconnectIntervalMs = 5000;
-
-void drawHint(M5Canvas& canvas, const char* text) {
+void drawHint(M5Canvas& canvas, UiLanguage language, const char* english,
+              const char* simplifiedChinese) {
     const int16_t y = config::kScreenHeight - theme::kHintHeight;
     canvas.fillRect(0, y, config::kScreenWidth, theme::kHintHeight, theme::kPanel);
-    canvas.setTextSize(1);
+    setUiFont(canvas, language);
     canvas.setTextDatum(middle_center);
     canvas.setTextColor(theme::kMuted, theme::kPanel);
-    canvas.drawString(text, config::kScreenWidth / 2, y + theme::kHintHeight / 2);
+    canvas.drawString(localized(language, english, simplifiedChinese),
+                      config::kScreenWidth / 2, y + theme::kHintHeight / 2);
 }
 
 uint16_t ansiColor(uint8_t color) {
-    static constexpr std::array<uint16_t, 16> palette{
-        theme::kBackground,
-        theme::rgb565(205, 76, 76),
-        theme::rgb565(65, 171, 93),
-        theme::rgb565(196, 164, 72),
-        theme::rgb565(73, 130, 201),
-        theme::rgb565(166, 94, 196),
-        theme::rgb565(72, 170, 180),
-        theme::kText,
-        theme::rgb565(92, 108, 119),
-        theme::rgb565(255, 112, 112),
-        theme::rgb565(111, 224, 143),
-        theme::rgb565(255, 211, 110),
-        theme::rgb565(112, 171, 255),
-        theme::rgb565(211, 145, 255),
-        theme::rgb565(100, 222, 225),
-        theme::rgb565(245, 255, 252),
-    };
-    return palette[color & 0x0Fu];
+    return theme::kAnsiPalette[color & 0x0Fu];
 }
 
-void drawTerminal(M5Canvas& canvas, const TerminalBuffer& terminal, bool connected) {
+void drawTerminal(M5Canvas& canvas, const TerminalBuffer& terminal, bool connected,
+                  UiLanguage language) {
     constexpr int16_t lineHeight = 8;
     constexpr int16_t cellWidth = 6;
     constexpr int16_t top = theme::kStatusHeight + 1;
-    canvas.setTextSize(1);
+    setTechnicalFont(canvas);
     canvas.setTextDatum(top_left);
 
     for (std::size_t row = 0; row < kTerminalRows; ++row) {
@@ -87,10 +74,16 @@ void drawTerminal(M5Canvas& canvas, const TerminalBuffer& terminal, bool connect
     }
 
     if (terminal.scrollOffset() > 0) {
-        char marker[12];
-        std::snprintf(marker, sizeof(marker), "HISTORY %u",
-                      static_cast<unsigned>(terminal.scrollOffset()));
+        char marker[24];
+        if (isSimplifiedChinese(language)) {
+            std::snprintf(marker, sizeof(marker), "历史 %u",
+                          static_cast<unsigned>(terminal.scrollOffset()));
+        } else {
+            std::snprintf(marker, sizeof(marker), "HISTORY %u",
+                          static_cast<unsigned>(terminal.scrollOffset()));
+        }
         canvas.fillRoundRect(167, 18, 70, 12, 2, theme::kPanelRaised);
+        setUiFont(canvas, language);
         canvas.setTextDatum(middle_center);
         canvas.setTextColor(theme::kWarning, theme::kPanelRaised);
         canvas.drawString(marker, 202, 24);
@@ -101,30 +94,41 @@ void drawTerminal(M5Canvas& canvas, const TerminalBuffer& terminal, bool connect
     }
 }
 
-bool retryable(SshError error) {
-    return error == SshError::NoNetwork || error == SshError::Connect ||
-           error == SshError::RemoteClosed || error == SshError::Write;
+bool autoRetryable(SshError error) {
+    // Retry automatically only when the user connected before Wi-Fi was ready.
+    // Repeating failed SSH handshakes can trigger OpenSSH per-source penalties;
+    // transport and remote-close failures therefore wait for explicit Enter.
+    return error == SshError::NoNetwork;
 }
 
 void drawHostList(M5Canvas& canvas, const SshAppModel& model, const SshHosts& hosts,
-                  const SshSnapshot& ssh, bool storeError) {
-    canvas.setTextSize(1);
+                  const SshSnapshot& ssh, bool storeError, UiLanguage language) {
+    setUiFont(canvas, language);
     canvas.setTextDatum(top_left);
     if (!ssh.keyAvailable) {
         canvas.setTextColor(theme::kError, theme::kBackground);
-        canvas.drawString("SSH PRIVATE KEY MISSING", 8, 28);
+        canvas.drawString(localized(language, "SSH PRIVATE KEY MISSING", "缺少 SSH 私钥"),
+                          8, 28);
         canvas.setTextColor(theme::kMuted, theme::kBackground);
-        canvas.drawString("Rebuild with POCKETDECK_SSH_KEY", 8, 49);
-        canvas.drawString("or ~/.ssh/id_rsa", 8, 65);
+        canvas.drawString(localized(language, "Rebuild with POCKETDECK_SSH_KEY",
+                                    "请用 POCKETDECK_SSH_KEY"),
+                          8, 49);
+        canvas.drawString(localized(language, "or ~/.ssh/id_rsa",
+                                    "或 ~/.ssh/id_rsa 重新构建"),
+                          8, 65);
     } else if (hosts.empty()) {
         canvas.setTextDatum(middle_center);
         canvas.setTextColor(theme::kPrimary, theme::kBackground);
-        canvas.setTextSize(2);
-        canvas.drawString("NO SSH HOSTS", config::kScreenWidth / 2, 49);
-        canvas.setTextSize(1);
+        if (!isSimplifiedChinese(language)) canvas.setTextSize(2);
+        canvas.drawString(localized(language, "NO SSH HOSTS", "没有 SSH 主机"),
+                          config::kScreenWidth / 2, 49);
+        setUiFont(canvas, language);
         canvas.setTextColor(theme::kMuted, theme::kBackground);
-        canvas.drawString("Press N to add your first host", config::kScreenWidth / 2, 74);
+        canvas.drawString(localized(language, "Press N to add your first host",
+                                    "按 N 添加第一台主机"),
+                          config::kScreenWidth / 2, 74);
     } else {
+        setTechnicalFont(canvas);
         const std::size_t selected = std::min(model.selectedHost(), hosts.size() - 1);
         const std::size_t start = selected >= 5 ? selected - 4 : 0;
         const std::size_t end = std::min(hosts.size(), start + 5);
@@ -145,17 +149,24 @@ void drawHostList(M5Canvas& canvas, const SshAppModel& model, const SshHosts& ho
         }
     }
     if (storeError) {
+        setTechnicalFont(canvas);
         canvas.setTextDatum(top_right);
         canvas.setTextColor(theme::kError, theme::kBackground);
         canvas.drawString("NVS!", 235, 18);
     }
-    drawHint(canvas, "N NEW  E EDIT  D DELETE  ENTER CONNECT");
+    drawHint(canvas, language, "N NEW  E EDIT  D DELETE  ENTER CONNECT",
+             "N 新建  E 编辑  D 删除  ENTER 连接");
 }
 
-void drawEditor(M5Canvas& canvas, const SshAppModel& model) {
-    static constexpr const char* labels[] = {"LABEL", "HOST / IP", "USERNAME", "PORT"};
+void drawEditor(M5Canvas& canvas, const SshAppModel& model, UiLanguage language) {
+    const char* labels[] = {
+        localized(language, "LABEL", "名称"),
+        localized(language, "HOST / IP", "主机 / IP"),
+        localized(language, "USERNAME", "用户名"),
+        localized(language, "PORT", "端口"),
+    };
     static constexpr int16_t yPositions[] = {21, 45, 69, 93};
-    canvas.setTextSize(1);
+    setUiFont(canvas, language);
     canvas.setTextDatum(top_left);
     for (std::size_t field = 0; field < 4; ++field) {
         const bool selected = model.selectedField() == field;
@@ -165,28 +176,33 @@ void drawEditor(M5Canvas& canvas, const SshAppModel& model) {
         if (selected) canvas.drawRoundRect(6, y, 228, 21, 3, theme::kPrimary);
         canvas.setTextColor(selected ? theme::kPrimary : theme::kMuted, background);
         canvas.drawString(labels[field], 10, y + 2);
+        setTechnicalFont(canvas);
         canvas.setTextColor(theme::kText, background);
         char value[34];
         std::snprintf(value, sizeof(value), "%.32s", model.editorValue(field));
         canvas.setTextDatum(top_right);
         canvas.drawString(value[0] != '\0' ? value : "--", 229, y + 8);
+        setUiFont(canvas, language);
         canvas.setTextDatum(top_left);
     }
     if (model.editorHasError()) {
         canvas.setTextDatum(top_right);
         canvas.setTextColor(theme::kError, theme::kBackground);
-        canvas.drawString("CHECK ALL FIELDS", 235, 106);
+        canvas.drawString(localized(language, "CHECK ALL FIELDS", "请检查全部字段"),
+                          235, 106);
     }
-    drawHint(canvas, "TAB FIELD  ENTER NEXT/SAVE  FN+` CANCEL");
+    drawHint(canvas, language, "TAB FIELD  ENTER NEXT/SAVE  FN+` CANCEL",
+             "TAB 字段  ENTER 下一项/保存  FN+` 取消");
 }
 
 void drawCentered(M5Canvas& canvas, const char* title, const char* detail,
-                  uint16_t color) {
+                  uint16_t color, UiLanguage language) {
     canvas.setTextDatum(middle_center);
-    canvas.setTextSize(2);
+    setUiFont(canvas, language);
+    if (!isSimplifiedChinese(language)) canvas.setTextSize(2);
     canvas.setTextColor(color, theme::kBackground);
     canvas.drawString(title, config::kScreenWidth / 2, 45);
-    canvas.setTextSize(1);
+    setFontForText(canvas, detail);
     canvas.setTextColor(theme::kMuted, theme::kBackground);
     canvas.drawString(detail, config::kScreenWidth / 2, 72);
 }
@@ -197,6 +213,7 @@ void SshApp::onEnter(SystemContext& context) {
     model_.reset();
     terminal_.reset();
     hasActiveHost_ = false;
+    retryPolicy_.cancel();
     if (!hostsLoaded_ && context.sshHostStore != nullptr) {
         const SshHostLoadResult loaded = context.sshHostStore->load();
         if (loaded.valid) hosts_ = loaded.hosts;
@@ -212,6 +229,7 @@ void SshApp::onEnter(SystemContext& context) {
 void SshApp::onExit(SystemContext& context) {
     if (context.ssh != nullptr) context.ssh->disconnect();
     hasActiveHost_ = false;
+    retryPolicy_.cancel();
     model_.reset();
 }
 
@@ -253,76 +271,97 @@ void SshApp::update(uint32_t nowMs, SystemContext& context) {
     if (snapshot.generation != lastSshGeneration_) {
         lastSshGeneration_ = snapshot.generation;
         if (snapshot.state == SshState::Connected) {
+            retryPolicy_.cancel();
             model_.showTerminal();
         } else if ((snapshot.state == SshState::Error ||
                     snapshot.state == SshState::Disconnected) &&
                    hasActiveHost_) {
             model_.showDisconnected();
+            if (autoRetryable(snapshot.error)) {
+                retryPolicy_.noteFailure(nowMs);
+            } else {
+                retryPolicy_.cancel();
+            }
         }
     }
 
     if (model_.page() == SshPage::Disconnected && hasActiveHost_ &&
-        context.wifiConnected && retryable(snapshot.error) &&
-        nowMs - lastReconnectAttemptMs_ >= kReconnectIntervalMs) {
+        context.wifiConnected && autoRetryable(snapshot.error) &&
+        retryPolicy_.takeDue(nowMs)) {
         reconnect(context);
     }
 }
 
 void SshApp::render(Display& display, const SystemContext& context) {
+    const UiLanguage language = context.settings != nullptr
+                                    ? context.settings->language
+                                    : UiLanguage::English;
     drawStatusBar(display, makeStatusBarData("SSH", context));
     auto& canvas = display.canvas();
     const SshSnapshot snapshot = context.ssh != nullptr ? context.ssh->snapshot()
                                                         : SshSnapshot{};
     switch (model_.page()) {
         case SshPage::HostList:
-            drawHostList(canvas, model_, hosts_, snapshot, storeError_);
+            drawHostList(canvas, model_, hosts_, snapshot, storeError_, language);
             return;
         case SshPage::Editor:
-            drawEditor(canvas, model_);
+            drawEditor(canvas, model_, language);
             return;
         case SshPage::ConfirmDelete: {
             const char* label = model_.selectedHost() < hosts_.size()
                                     ? hosts_.at(model_.selectedHost()).label.data()
-                                    : "host";
-            drawCentered(canvas, "DELETE HOST?", label, theme::kError);
-            drawHint(canvas, "ENTER DELETE   DEL CANCEL");
+                                    : localized(language, "host", "主机");
+            drawCentered(canvas, localized(language, "DELETE HOST?", "删除主机？"),
+                         label, theme::kError, language);
+            drawHint(canvas, language, "ENTER DELETE   DEL CANCEL",
+                     "ENTER 删除   DEL 取消");
             return;
         }
         case SshPage::Connecting:
-            drawCentered(canvas, sshStateLabel(snapshot.state), activeHost_.label.data(),
-                         theme::kWarning);
+            drawCentered(canvas, localizedSshStateLabel(snapshot.state, language),
+                         activeHost_.label.data(), theme::kWarning, language);
+            setUiFont(canvas, language);
             canvas.setTextDatum(middle_center);
-            canvas.setTextColor(theme::kError, theme::kBackground);
-            canvas.drawString("HOST KEY VERIFICATION OFF", config::kScreenWidth / 2, 91);
-            drawHint(canvas, "DEL CANCEL   G0 HOME");
+            canvas.setTextColor(theme::kMuted, theme::kBackground);
+            canvas.drawString(localized(language, "HOST KEY CHECK: OFF",
+                                        "主机密钥校验：关闭"),
+                              config::kScreenWidth / 2, 91);
+            drawHint(canvas, language, "DEL CANCEL   G0 HOME",
+                     "DEL 取消   G0 主页");
             return;
         case SshPage::Disconnected: {
-            drawCentered(canvas, sshStateLabel(snapshot.state), sshErrorLabel(snapshot.error),
+            drawCentered(canvas, localizedSshStateLabel(snapshot.state, language),
+                         localizedSshErrorLabel(snapshot.error, language),
                          snapshot.error == SshError::Authentication ? theme::kError
-                                                                    : theme::kWarning);
-            if (retryable(snapshot.error) && context.wifiConnected) {
-                const uint32_t elapsed = context.uptimeMs - lastReconnectAttemptMs_;
-                const uint32_t remaining = elapsed >= kReconnectIntervalMs
-                                               ? 0
-                                               : (kReconnectIntervalMs - elapsed + 999) / 1000;
-                char retry[32];
-                std::snprintf(retry, sizeof(retry), "Auto retry in %lus",
-                              static_cast<unsigned long>(remaining));
+                                                                    : theme::kWarning,
+                         language);
+            if (autoRetryable(snapshot.error) && context.wifiConnected) {
+                const uint32_t remaining = retryPolicy_.secondsRemaining(context.uptimeMs);
+                char retry[48];
+                if (isSimplifiedChinese(language)) {
+                    std::snprintf(retry, sizeof(retry), "自动重试 %lu 秒",
+                                  static_cast<unsigned long>(remaining));
+                } else {
+                    std::snprintf(retry, sizeof(retry), "Auto retry in %lus",
+                                  static_cast<unsigned long>(remaining));
+                }
+                setUiFont(canvas, language);
                 canvas.setTextDatum(middle_center);
                 canvas.setTextColor(theme::kMuted, theme::kBackground);
                 canvas.drawString(retry, config::kScreenWidth / 2, 91);
             }
-            drawHint(canvas, "ENTER RETRY   DEL HOSTS   G0 HOME");
+            drawHint(canvas, language, "ENTER RETRY   DEL HOSTS   G0 HOME",
+                     "ENTER 重试   DEL 主机   G0 主页");
             return;
         }
         case SshPage::Terminal:
-            drawTerminal(canvas, terminal_, snapshot.state == SshState::Connected);
+            drawTerminal(canvas, terminal_, snapshot.state == SshState::Connected, language);
             return;
         case SshPage::QuickCommands:
-            drawTerminal(canvas, terminal_, snapshot.state == SshState::Connected);
+            drawTerminal(canvas, terminal_, snapshot.state == SshState::Connected, language);
             canvas.fillRoundRect(25, 26, 190, 82, 6, theme::kPanelRaised);
             canvas.drawRoundRect(25, 26, 190, 82, 6, theme::kPrimary);
-            canvas.setTextSize(1);
+            setTechnicalFont(canvas);
             canvas.setTextDatum(top_left);
             for (std::size_t index = 0; index < 4; ++index) {
                 const bool active = index == model_.selectedQuickCommand();
@@ -371,6 +410,7 @@ void SshApp::handleResult(const SshResult& result, SystemContext& context) {
             if (hosts_.erase(result.index)) saveHosts(context);
             return;
         case SshEffect::CancelConnection:
+            retryPolicy_.cancel();
             if (context.ssh != nullptr) context.ssh->disconnect();
             return;
         case SshEffect::Reconnect:
@@ -395,7 +435,7 @@ void SshApp::connectHost(std::size_t index, SystemContext& context) {
     hosts_.touch(index);
     saveHosts(context);
     terminal_.reset();
-    lastReconnectAttemptMs_ = context.uptimeMs;
+    retryPolicy_.cancel();
     if (context.ssh->connect(activeHost_)) {
         model_.showConnecting();
     } else {
@@ -405,7 +445,7 @@ void SshApp::connectHost(std::size_t index, SystemContext& context) {
 
 void SshApp::reconnect(SystemContext& context) {
     if (!hasActiveHost_ || context.ssh == nullptr || !serviceReady_) return;
-    lastReconnectAttemptMs_ = context.uptimeMs;
+    retryPolicy_.cancel();
     if (context.ssh->connect(activeHost_)) model_.showConnecting();
 }
 

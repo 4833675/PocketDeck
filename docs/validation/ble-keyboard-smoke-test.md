@@ -1,6 +1,6 @@
 # Pocket Deck BLE Keyboard Hardware Smoke Test
 
-This is a reusable hardware-validation template for Pocket Deck `0.4.0` or
+This is a reusable hardware-validation template for Pocket Deck `0.9.6` or
 later. Automated tests and a successful firmware link do not mark a hardware
 row as passed. Fill in every result after flashing a real M5Stack Cardputer Adv.
 
@@ -11,7 +11,7 @@ row as passed. Fill in every result after flashing a real M5Stack Cardputer Adv.
 | Date / time | Pending |
 | Tester | Pending |
 | Firmware commit | Pending |
-| Firmware version | 0.4.0 or later |
+| Firmware version | 0.9.6 or later |
 | Cardputer model | M5Stack Cardputer Adv |
 | Mac model | Pending |
 | macOS version | Pending |
@@ -40,6 +40,7 @@ the six-digit pairing code or typed test content in this file.
 | SYS-04 | G0 long | Hold G0 for at least 600 ms in Home, Keyboard, and Settings | Quick Settings opens once; release does not trigger Home | Pending | |
 | SYS-05 | Quick controls | Adjust brightness/volume, toggle BLE, close with Backspace | Hardware changes immediately; changed values survive restart | Pending | |
 | SYS-06 | Settings diagnostics | Open Settings > System > Diagnostics | Reset reason, heap data, and recent bounded events are visible | Pending | |
+| SYS-07 | Keyboard localization | Switch between English and Chinese, then observe Bluetooth off, advertising, pairing, connected, and error screens | Product state, explanation, and footer switch language; pairing digits and modifier names stay literal; no clipping or missing glyphs | Pending | |
 
 ## Initial pairing and reconnect
 

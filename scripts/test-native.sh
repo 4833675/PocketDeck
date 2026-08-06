@@ -34,18 +34,26 @@ sources=(test/native/test_main.cpp src/core/mac_keymap.cpp src/core/text_keymap.
          src/core/lora_data.cpp src/core/lora_tx_policy.cpp src/core/media_data.cpp)
 for source in src/core/input_router.cpp src/core/g0_gesture.cpp src/core/system_settings.cpp \
               src/core/ble_keyboard_policy.cpp src/core/clock_data.cpp src/core/gps_data.cpp \
-              src/apps/gps/gps_app_model.cpp \
+              src/apps/gps/gps_app_model.cpp src/apps/gps/gps_app_text.cpp \
+              src/apps/keyboard/keyboard_app_text.cpp \
               src/apps/lora/lora_app_model.cpp \
+              src/apps/lora/lora_app_text.cpp \
               src/apps/media/media_app_model.cpp \
+              src/apps/media/media_app_text.cpp \
+              src/apps/settings/settings_app_text.cpp \
+              src/apps/ssh/ssh_app_text.cpp \
               src/core/serial_command.cpp \
               src/core/ssh_error_detail.cpp \
+              src/core/ssh_retry_policy.cpp \
               src/core/ssh_hosts.cpp \
               src/core/ssh_host_record.cpp \
               src/core/terminal_buffer.cpp \
               src/core/terminal_input.cpp \
               src/core/wifi_data.cpp \
+              src/core/wifi_recovery_policy.cpp \
               src/core/wifi_profiles.cpp \
               src/core/weather_data.cpp \
+              src/apps/weather/weather_app_text.cpp \
               src/apps/launcher/launcher_model.cpp \
               src/apps/ssh/ssh_app_model.cpp \
               src/apps/settings/settings_model.cpp src/services/diagnostics_service.cpp \
@@ -55,7 +63,7 @@ for source in src/core/input_router.cpp src/core/g0_gesture.cpp src/core/system_
     fi
 done
 
-c++ -std=c++17 -Wall -Wextra -Werror -Isrc -Itest/native \
+c++ -std=c++17 -Wall -Wextra -Werror -Iinclude -Isrc -Itest/native \
     "${sources[@]}" -o .build/native_tests
 
 .build/native_tests

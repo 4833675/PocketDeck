@@ -1,6 +1,6 @@
 # Pocket Deck Wi-Fi and Weather Hardware Smoke Test
 
-Target firmware: `0.4.0` or later on M5Stack Cardputer Adv.
+Target firmware: `0.9.4` or later on M5Stack Cardputer Adv.
 
 | ID | Test | Expected | Result | Notes |
 |---|---|---|---|---|
@@ -23,4 +23,6 @@ Target firmware: `0.4.0` or later on M5Stack Cardputer Adv.
 | WX-03 | Press Enter in Weather | A manual refresh completes without freezing UI | Pending | |
 | WX-04 | Disconnect GPS after a successful forecast | Existing weather remains with an amber cached/GPS status | Pending | |
 | WX-05 | Fail a refresh after a successful forecast | Existing weather remains with an update-error status | Pending | |
+| WX-06 | Simplified Chinese | Inspect live, waiting, offline, cached, and error states in Chinese. | Weather condition, labels, status, age, hints, and common errors are Chinese without clipping or missing glyphs. | Pending | |
+| WX-07 | Runtime language switch | Switch Chinese/English and reopen Weather. | Weather updates immediately in both directions while numeric values and units remain unchanged. | Pending | |
 | RESET-01 | Factory reset | App settings, all Wi-Fi profiles, and BLE bond are erased | Pending | |

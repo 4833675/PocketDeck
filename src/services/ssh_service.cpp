@@ -7,10 +7,12 @@
 #include <Arduino.h>
 #include <WiFi.h>
 #include <esp_heap_caps.h>
+#include <libssh/callbacks.h>
 #include <libssh/libssh.h>
 
 #include "core/ssh_error_detail.h"
 #include "core/ssh_memory_budget.h"
+#include "core/ssh_transport_profile.h"
 #include "services/diagnostics_service.h"
 #include "ssh_private_key.h"
 
@@ -189,6 +191,13 @@ void SshService::taskEntry(void* context) {
     static_cast<SshService*>(context)->taskLoop();
 }
 
+void SshService::connectStatusCallback(void* context, float status) {
+    auto* service = static_cast<SshService*>(context);
+    if (service == nullptr) return;
+    const uint8_t stage = static_cast<uint8_t>(status * 100.0f + 0.5f);
+    service->lastConnectStage_ = stage;
+}
+
 void SshService::taskLoop() {
     if (ssh_init() != SSH_OK) {
         setState(SshState::Error, SshError::ServiceUnavailable);
@@ -328,16 +337,39 @@ bool SshService::establish(const SshHost& host, void* rawPrivateKey,
         setState(SshState::Error, SshError::SessionCreate);
         return false;
     }
+    static ssh_callbacks_struct callbacks{};
+    callbacks = {};
+    callbacks.userdata = this;
+    callbacks.connect_status_function = &SshService::connectStatusCallback;
+    ssh_callbacks_init(&callbacks);
+    lastConnectStage_ = 0;
+    if (ssh_set_callbacks(session, &callbacks) != SSH_OK) {
+        closeConnection(channel, session);
+        setState(SshState::Error, SshError::Configure);
+        return false;
+    }
     const unsigned int port = host.port;
     const int verbosity = SSH_LOG_NOLOG;
     if (ssh_options_set(session, SSH_OPTIONS_HOST, host.hostname.data()) != SSH_OK ||
         ssh_options_set(session, SSH_OPTIONS_USER, host.username.data()) != SSH_OK ||
         ssh_options_set(session, SSH_OPTIONS_PORT, &port) != SSH_OK ||
         ssh_options_set(session, SSH_OPTIONS_TIMEOUT, &kConnectTimeoutSeconds) != SSH_OK ||
+        ssh_options_set(session, SSH_OPTIONS_CIPHERS_C_S,
+                        ssh_transport::kCipher) != SSH_OK ||
+        ssh_options_set(session, SSH_OPTIONS_CIPHERS_S_C,
+                        ssh_transport::kCipher) != SSH_OK ||
         ssh_options_set(session, SSH_OPTIONS_LOG_VERBOSITY, &verbosity) != SSH_OK) {
         closeConnection(channel, session);
         setState(SshState::Error, SshError::Configure);
         return false;
+    }
+    if (diagnostics_ != nullptr) {
+        diagnostics_->enqueuef(
+            "SSH transport profile cipher=%s free=%lu largest=%lu stack-free=%lu",
+            ssh_transport::kCipher, static_cast<unsigned long>(ESP.getFreeHeap()),
+            static_cast<unsigned long>(
+                heap_caps_get_largest_free_block(MALLOC_CAP_8BIT)),
+            static_cast<unsigned long>(uxTaskGetStackHighWaterMark(nullptr)));
     }
     if (ssh_connect(session) != SSH_OK) {
         const int socketError = errno;
@@ -351,7 +383,8 @@ bool SshService::establish(const SshHost& host, void* rawPrivateKey,
                 lastConnectDetail_ = safeDetail;
             }
             diagnostics_->enqueuef(
-                "SSH connect fail class=%s code=%d errno=%d free=%lu largest=%lu stack-free=%lu",
+                "SSH connect fail stage=%u class=%s code=%d errno=%d free=%lu largest=%lu stack-free=%lu",
+                static_cast<unsigned>(lastConnectStage_),
                 connectFailureClass(ssh_get_error(session), socketError), libsshError,
                 socketError, static_cast<unsigned long>(ESP.getFreeHeap()),
                 static_cast<unsigned long>(

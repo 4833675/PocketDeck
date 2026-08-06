@@ -400,6 +400,13 @@ void System::handleSystemCommand(SystemCommand command) {
             diagnostics_.log(forgotten ? "BLE host bond deleted" : "BLE bond deletion failed");
             return;
         }
+        case SystemCommand::ToggleLanguage:
+            settings_.language = toggledUiLanguage(settings_.language);
+            diagnostics_.log(isSimplifiedChinese(settings_.language)
+                                 ? "UI language: zh-CN"
+                                 : "UI language: en");
+            saveSettings();
+            return;
         case SystemCommand::MountStorage: {
             bool logging = sdLog_.remount();
             if (logging) {
@@ -539,6 +546,21 @@ void System::trackWifiState(const WifiSnapshot& snapshot) {
         }
         lastWifiScanGeneration_ = snapshot.scanGeneration;
     }
+    if (snapshot.disconnectGeneration != lastWifiDisconnectGeneration_) {
+        diagnostics_.logf("WiFi disconnect: reason=%u %s",
+                          static_cast<unsigned>(snapshot.lastDisconnectReason),
+                          wifiDisconnectReasonLabel(snapshot.lastDisconnectReason));
+        lastWifiDisconnectGeneration_ = snapshot.disconnectGeneration;
+    }
+    if (snapshot.lostIpGeneration != lastWifiLostIpGeneration_) {
+        diagnostics_.log("WiFi event: LOST_IP");
+        lastWifiLostIpGeneration_ = snapshot.lostIpGeneration;
+    }
+    if (snapshot.recoveryGeneration != lastWifiRecoveryGeneration_) {
+        diagnostics_.logf("WiFi recovery: %s",
+                          wifiRecoveryActionLabel(snapshot.lastRecoveryAction));
+        lastWifiRecoveryGeneration_ = snapshot.recoveryGeneration;
+    }
     if (snapshot.ntpSynced && snapshot.utcEpoch > 0) {
         static bool loggedTimeSync = false;
         if (!loggedTimeSync) {
@@ -570,7 +592,10 @@ void System::render() {
     lastRenderMs_ = millis();
     display_.beginFrame();
     current_->render(display_, context_);
-    if (quickSettings_.active()) quickSettings_.render(display_, context_.batteryPercent);
+    if (quickSettings_.active()) {
+        quickSettings_.render(display_, context_.batteryPercent,
+                              settings_.language);
+    }
     display_.endFrame();
 }
 

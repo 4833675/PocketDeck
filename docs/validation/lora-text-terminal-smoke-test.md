@@ -46,9 +46,9 @@ of 868.0 MHz and +22 dBm is permitted at the test location before transmitting.
 
 | Check | Command | Expected evidence | Result | Notes |
 |---|---|---|---|---|
-| Native model tests | `scripts/test-native.sh` | LoRa payload, state, history, and GPS navigation checks pass | Pass | 798 checks; native only, not RF evidence |
-| Firmware build | `pio run -e cardputer-adv` | RadioLib 7.7.1 compiles for Cardputer Adv | Pass | Clean build; not hardware evidence |
-| Whitespace | `git diff --check` | No whitespace errors | Pass | Task 5 validation run |
+| Native model tests | `scripts/test-native.sh` | LoRa payload, state, history, localization, display budget, and GPS navigation checks pass | Pass | 1,104 checks; native only, not RF evidence |
+| Firmware build | `pio run -e cardputer-adv` | RadioLib 7.7.1 compiles for Cardputer Adv | Pass | v0.9.6 clean build; not hardware evidence |
+| Whitespace | `git diff --check` | No whitespace errors | Pass | v0.9.6 validation run |
 
 ## Cap, radio, and two-endpoint checks
 
@@ -74,6 +74,7 @@ byte-for-byte equality on the receiving endpoint without copying the payload.
 | LORA-13 | BLE regression | After LORA has initialized, connect/use Keyboard. | BLE remains responsive and no local LORA keystrokes leak as HID. | Pending | |
 | LORA-14 | Wi-Fi/weather regression | After LORA has initialized, scan/connect or use existing Wi-Fi/weather paths. | Wi-Fi, clock, and weather remain responsive. | Pending | Do not expose SSIDs or coordinates. |
 | LORA-15 | SSH regression | After LORA has initialized, open and use the SSH Terminal. | SSH remains reachable and responsive; no terminal content is logged. | Pending | |
+| LORA-16 | Runtime localization | Switch English / Chinese and revisit unavailable, listening, transmitting, error, and rejected-send states. | Product title, state, rejection, and footer switch language; RF profile, RSSI/SNR, draft, and RX/TX payloads remain literal. | Pending | |
 
 ## Result summary
 
