@@ -46,7 +46,7 @@ private:
     float zeroPitchDegrees_ = 0.0f;
     uint32_t lastReadMs_ = 0;
     bool begun_ = false;
-    bool sampleDue_ = false;
+    bool hasReadAttempt_ = false;
 };
 
 }  // namespace pd

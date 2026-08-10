@@ -23,16 +23,16 @@ void ImuService::setActive(bool active) {
     if (snapshot_.active == nextActive) return;
 
     snapshot_.active = nextActive;
-    sampleDue_ = nextActive;
 }
 
 void ImuService::update(uint32_t nowMs) {
     if (!snapshot_.active || !snapshot_.available) return;
-    if (!sampleDue_ && static_cast<uint32_t>(nowMs - lastReadMs_) < kSampleIntervalMs) {
+    if (hasReadAttempt_ &&
+        static_cast<uint32_t>(nowMs - lastReadMs_) < kSampleIntervalMs) {
         return;
     }
 
-    sampleDue_ = false;
+    hasReadAttempt_ = true;
     lastReadMs_ = nowMs;
 
     MotionSample sample;
