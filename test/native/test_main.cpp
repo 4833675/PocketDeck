@@ -2220,6 +2220,22 @@ TEST_CASE(recorder_wav_builder_writes_the_canonical_44_byte_header) {
     CHECK(!recorderBuildWavHeader(actual.data(), actual.size() - 1, 0));
 }
 
+TEST_CASE(recorder_wav_builder_rejects_riff_size_overflow) {
+    constexpr uint32_t maximumDataBytes = 0xFFFFFFFFu - 36u;
+    std::array<uint8_t, kRecorderWavHeaderBytes> header{};
+
+    CHECK(recorderBuildWavHeader(header.data(), header.size(), maximumDataBytes));
+    CHECK_EQ(header[4], 0xFFu);
+    CHECK_EQ(header[5], 0xFFu);
+    CHECK_EQ(header[6], 0xFFu);
+    CHECK_EQ(header[7], 0xFFu);
+    CHECK_EQ(header[40], 0xDBu);
+    CHECK_EQ(header[41], 0xFFu);
+    CHECK_EQ(header[42], 0xFFu);
+    CHECK_EQ(header[43], 0xFFu);
+    CHECK(!recorderBuildWavHeader(header.data(), header.size(), maximumDataBytes + 1u));
+}
+
 TEST_CASE(recorder_wav_parser_returns_fixed_metadata_for_canonical_data) {
     constexpr std::array<uint8_t, kRecorderWavHeaderBytes> header{{
         'R', 'I', 'F', 'F', 0x24, 0xFA, 0x00, 0x00, 'W', 'A', 'V', 'E',
@@ -2234,6 +2250,19 @@ TEST_CASE(recorder_wav_parser_returns_fixed_metadata_for_canonical_data) {
     CHECK_EQ(metadata.dataBytes, 64000u);
     CHECK_EQ(recorderParseWavHeader(header.data(), header.size(), 64099, nullptr),
              RecorderWavParseResult::Valid);
+}
+
+TEST_CASE(recorder_wav_parser_rejects_partial_pcm_frames) {
+    constexpr std::array<uint8_t, kRecorderWavHeaderBytes> partialFrameHeader{{
+        'R', 'I', 'F', 'F', 0x25, 0x00, 0x00, 0x00, 'W', 'A', 'V', 'E',
+        'f', 'm', 't', ' ', 0x10, 0x00, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00,
+        0x80, 0x3E, 0x00, 0x00, 0x00, 0x7D, 0x00, 0x00, 0x02, 0x00, 0x10, 0x00,
+        'd', 'a', 't', 'a', 0x01, 0x00, 0x00, 0x00,
+    }};
+
+    CHECK_EQ(recorderParseWavHeader(partialFrameHeader.data(), partialFrameHeader.size(), 45,
+                                    nullptr),
+             RecorderWavParseResult::Malformed);
 }
 
 TEST_CASE(recorder_wav_parser_rejects_malformed_and_unsupported_headers) {
@@ -2678,7 +2707,9 @@ int main() {
     media_library_is_bounded_and_selection_wraps();
     media_progress_and_elapsed_clock_are_bounded_and_wrap_safe();
     recorder_wav_builder_writes_the_canonical_44_byte_header();
+    recorder_wav_builder_rejects_riff_size_overflow();
     recorder_wav_parser_returns_fixed_metadata_for_canonical_data();
+    recorder_wav_parser_rejects_partial_pcm_frames();
     recorder_wav_parser_rejects_malformed_and_unsupported_headers();
     recorder_timestamp_candidates_require_a_real_calendar_time_and_capacity();
     recorder_sequential_candidates_are_fixed_and_bounded();

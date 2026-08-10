@@ -111,6 +111,7 @@ RecorderWavParseResult recorderParseWavHeader(const uint8_t* bytes, std::size_t 
         readLe16(bytes + 34) != 16) {
         return RecorderWavParseResult::Unsupported;
     }
+    if (dataBytes % 2u != 0u) return RecorderWavParseResult::Malformed;
 
     if (metadata != nullptr) {
         metadata->dataBytes = dataBytes;
