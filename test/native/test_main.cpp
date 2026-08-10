@@ -2066,9 +2066,17 @@ TEST_CASE(remote_app_model_ignores_non_remote_actions_and_empty_input) {
         CHECK_EQ(result.effect, RemoteAppEffect::None);
         CHECK_EQ(result.command, SonyIrCommand::None);
     }
-    const auto ignoredActionWithCharacter = model.handle({InputAction::Back, 'p'});
-    CHECK_EQ(ignoredActionWithCharacter.effect, RemoteAppEffect::None);
-    CHECK_EQ(ignoredActionWithCharacter.command, SonyIrCommand::None);
+    constexpr std::array<InputEvent, 4> ignoredActionsWithMappedCharacters{{
+        {InputAction::Back, 'p'},
+        {InputAction::Tab, 'p'},
+        {InputAction::Escape, 'h'},
+        {InputAction::QuickCommands, 'i'},
+    }};
+    for (const auto& input : ignoredActionsWithMappedCharacters) {
+        const auto result = model.handle(input);
+        CHECK_EQ(result.effect, RemoteAppEffect::None);
+        CHECK_EQ(result.command, SonyIrCommand::None);
+    }
     const auto downScroll = model.handle({InputAction::ScrollDown, '\0'});
     CHECK_EQ(downScroll.effect, RemoteAppEffect::None);
     CHECK_EQ(downScroll.command, SonyIrCommand::None);
