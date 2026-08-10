@@ -18,6 +18,7 @@ enum class RuntimeResource : uint8_t {
     MediaRealtime = 1u << 4u,
     Imu = 1u << 5u,
     Ir = 1u << 6u,
+    RecorderRealtime = 1u << 7u,
 };
 
 struct AppResourceProfile {
@@ -53,6 +54,8 @@ constexpr AppResourceProfile resourceProfileFor(AppId app) {
             return makeResourceProfile(RuntimeResource::LoRa);
         case AppId::Media:
             return makeResourceProfile(RuntimeResource::MediaRealtime);
+        case AppId::Recorder:
+            return makeResourceProfile(RuntimeResource::RecorderRealtime);
         case AppId::Weather:
             return makeResourceProfile(RuntimeResource::Wifi, RuntimeResource::Gps);
         case AppId::Settings:

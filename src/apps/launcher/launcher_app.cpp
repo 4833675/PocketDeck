@@ -3,6 +3,7 @@
 #include <cstdio>
 
 #include "apps/gps/gps_app_text.h"
+#include "apps/recorder/recorder_app_text.h"
 #include "apps/weather/weather_app_text.h"
 #include "core/gps_data.h"
 #include "core/localization.h"
@@ -28,6 +29,7 @@ const char* appTitle(AppId id, UiLanguage language) {
         case AppId::Remote: return localized(language, "REMOTE", "遥控器");
         case AppId::LoRa: return localized(language, "LORA", "LoRa 通信");
         case AppId::Media: return localized(language, "MEDIA", "媒体");
+        case AppId::Recorder: return localizedRecorderLauncherTitle(language);
         case AppId::Weather: return localized(language, "WEATHER", "天气");
         case AppId::Settings: return localized(language, "SETTINGS", "设置");
         default: return localized(language, "APP", "应用");
@@ -54,6 +56,7 @@ const char* appIcon(AppId id) {
         case AppId::Remote: return "IR";
         case AppId::LoRa: return "LR";
         case AppId::Media: return "MP";
+        case AppId::Recorder: return "RC";
         case AppId::Weather: return "WX";
         case AppId::Settings: return "::";
         default: return "--";
@@ -135,6 +138,9 @@ void LauncherApp::render(Display& display, const SystemContext& context) {
     } else if (model_.selected() == AppId::Media) {
         std::snprintf(subtitle, sizeof(subtitle), "%s",
                       localized(language, "TF card MP3 player", "TF 卡 MP3 播放器"));
+    } else if (model_.selected() == AppId::Recorder) {
+        std::snprintf(subtitle, sizeof(subtitle), "%s",
+                      localizedRecorderLauncherSubtitle(language));
     } else if (model_.selected() == AppId::Weather) {
         const WeatherSnapshot weather = context.weather != nullptr
                                             ? context.weather->snapshot()

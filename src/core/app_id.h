@@ -14,6 +14,7 @@ enum class AppId : uint8_t {
     Remote,
     LoRa,
     Media,
+    Recorder,
     Weather,
     Settings,
 };

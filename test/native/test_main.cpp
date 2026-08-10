@@ -18,6 +18,7 @@
 #include "apps/motion/motion_app_model.h"
 #include "apps/remote/remote_app_model.h"
 #include "apps/recorder/recorder_app_model.h"
+#include "apps/recorder/recorder_app_text.h"
 #include "apps/settings/settings_model.h"
 #include "apps/settings/settings_app_text.h"
 #include "apps/weather/weather_app_text.h"
@@ -159,6 +160,31 @@ TEST_CASE(weather_and_media_profiles_have_explicit_tradeoffs) {
     const auto settings = resourceProfileFor(AppId::Settings);
     CHECK(settings.needs(RuntimeResource::Wifi));
     CHECK(settings.needs(RuntimeResource::Ble));
+}
+
+TEST_CASE(recorder_has_a_unique_realtime_resource_and_no_background_workloads) {
+    CHECK_EQ(resourceMask(RuntimeResource::RecorderRealtime), 1u << 7u);
+    CHECK_EQ(static_cast<uint8_t>(AppId::Recorder),
+             static_cast<uint8_t>(AppId::Media) + 1u);
+
+    const auto recorder = resourceProfileFor(AppId::Recorder);
+    CHECK(recorder.needs(RuntimeResource::RecorderRealtime));
+    CHECK(!recorder.needs(RuntimeResource::Ble));
+    CHECK(!recorder.needs(RuntimeResource::Wifi));
+    CHECK(!recorder.needs(RuntimeResource::Gps));
+    CHECK(!recorder.needs(RuntimeResource::LoRa));
+    CHECK(!recorder.needs(RuntimeResource::Imu));
+    CHECK(!recorder.needs(RuntimeResource::Ir));
+    CHECK(!recorder.needs(RuntimeResource::MediaRealtime));
+
+    constexpr std::array<AppId, 11> otherApps{
+        AppId::None,     AppId::Launcher, AppId::Keyboard, AppId::Ssh,
+        AppId::Gps,      AppId::Motion,   AppId::Remote,   AppId::LoRa,
+        AppId::Media,    AppId::Weather,  AppId::Settings,
+    };
+    for (const AppId app : otherApps) {
+        CHECK(!resourceProfileFor(app).needs(RuntimeResource::RecorderRealtime));
+    }
 }
 
 TEST_CASE(ssh_error_detail_redacts_endpoint_identity) {
@@ -556,6 +582,8 @@ TEST_CASE(launcher_starts_on_keyboard_and_wraps) {
     model.handle(InputAction::Right);
     CHECK_EQ(model.selected(), AppId::Media);
     model.handle(InputAction::Right);
+    CHECK_EQ(model.selected(), AppId::Recorder);
+    model.handle(InputAction::Right);
     CHECK_EQ(model.selected(), AppId::Weather);
     model.handle(InputAction::Right);
     CHECK_EQ(model.selected(), AppId::Settings);
@@ -583,10 +611,61 @@ TEST_CASE(launcher_confirm_requests_selected_app) {
     model.handle(InputAction::Right);
     CHECK_EQ(model.handle(InputAction::Confirm), AppId::Media);
     model.handle(InputAction::Right);
+    CHECK_EQ(model.handle(InputAction::Confirm), AppId::Recorder);
+    model.handle(InputAction::Right);
     CHECK_EQ(model.handle(InputAction::Confirm), AppId::Weather);
     model.handle(InputAction::Right);
     CHECK_EQ(model.handle(InputAction::Confirm), AppId::Settings);
     CHECK_EQ(model.handle(InputAction::Back), AppId::None);
+}
+
+TEST_CASE(recorder_localized_text_covers_visible_states_errors_and_launcher_labels) {
+    CHECK_STR_EQ(localizedRecorderLauncherTitle(UiLanguage::English), "RECORDER");
+    CHECK_STR_EQ(localizedRecorderLauncherTitle(UiLanguage::SimplifiedChinese), "录音机");
+    CHECK_STR_EQ(localizedRecorderLauncherSubtitle(UiLanguage::English),
+                 "TF card WAV recorder");
+    CHECK_STR_EQ(localizedRecorderLauncherSubtitle(UiLanguage::SimplifiedChinese),
+                 "TF 卡 WAV 录音机");
+
+    CHECK_STR_EQ(localizedRecorderStateLabel(0, UiLanguage::English),
+                 "NO TF CARD");
+    CHECK_STR_EQ(localizedRecorderStateLabel(1,
+                                             UiLanguage::SimplifiedChinese),
+                 "没有 WAV 文件");
+    CHECK_STR_EQ(localizedRecorderStateLabel(2,
+                                             UiLanguage::SimplifiedChinese),
+                 "就绪");
+    CHECK_STR_EQ(localizedRecorderStateLabel(3,
+                                             UiLanguage::SimplifiedChinese),
+                 "录音中");
+    CHECK_STR_EQ(localizedRecorderStateLabel(4,
+                                             UiLanguage::SimplifiedChinese),
+                 "播放中");
+    CHECK_STR_EQ(localizedRecorderStateLabel(5,
+                                             UiLanguage::SimplifiedChinese),
+                 "不支持的 WAV");
+    CHECK_STR_EQ(localizedRecorderStateLabel(6,
+                                             UiLanguage::SimplifiedChinese),
+                 "损坏的 WAV");
+
+    CHECK_STR_EQ(localizedRecorderErrorLabel(1,
+                                             UiLanguage::SimplifiedChinese),
+                 "未检测到 TF 卡");
+    CHECK_STR_EQ(localizedRecorderErrorLabel(8,
+                                             UiLanguage::English),
+                 "MIC START FAILED");
+    CHECK_STR_EQ(localizedRecorderErrorLabel(12,
+                                             UiLanguage::SimplifiedChinese),
+                 "PCM 写入失败");
+    CHECK_STR_EQ(localizedRecorderErrorLabel(20,
+                                             UiLanguage::SimplifiedChinese),
+                 "不支持的 WAV");
+    CHECK_STR_EQ(localizedRecorderErrorLabel(21,
+                                             UiLanguage::SimplifiedChinese),
+                 "损坏的 WAV");
+    CHECK_STR_EQ(localizedRecorderErrorLabel(22,
+                                             UiLanguage::SimplifiedChinese),
+                 "删除失败");
 }
 
 TEST_CASE(wifi_and_weather_labels_cover_visible_states) {
@@ -2785,6 +2864,7 @@ int main() {
     app_resource_profiles_isolate_foreground_workloads();
     motion_is_the_only_app_requesting_the_imu();
     remote_is_the_only_app_requesting_ir();
+    recorder_has_a_unique_realtime_resource_and_no_background_workloads();
     weather_and_media_profiles_have_explicit_tradeoffs();
     ssh_error_detail_redacts_endpoint_identity();
     ssh_error_detail_stays_single_line_and_never_partially_copies_secret();
@@ -2821,6 +2901,7 @@ int main() {
     localization_switches_without_dynamic_storage();
     launcher_starts_on_keyboard_and_wraps();
     launcher_confirm_requests_selected_app();
+    recorder_localized_text_covers_visible_states_errors_and_launcher_labels();
     wifi_and_weather_labels_cover_visible_states();
     weather_localized_text_covers_conditions_states_and_errors();
     keyboard_localized_text_covers_every_state_and_error();

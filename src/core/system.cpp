@@ -60,6 +60,7 @@ const char* appName(AppId id) {
         case AppId::Remote: return "REMOTE";
         case AppId::LoRa: return "LORA";
         case AppId::Media: return "MEDIA";
+        case AppId::Recorder: return "RECORDER";
         case AppId::Weather: return "WEATHER";
         case AppId::Settings: return "SETTINGS";
         case AppId::None: return "NONE";
@@ -80,6 +81,7 @@ void System::begin() {
     context_.ir = &ir_;
     context_.lora = &lora_;
     context_.media = &media_;
+    context_.recorder = &recorder_;
     context_.wifi = &wifi_;
     context_.weather = &weather_;
     context_.sdLog = &sdLog_;
@@ -143,6 +145,7 @@ void System::update() {
     gps_.update();
     lora_.update(nowMs);
     media_.update(nowMs);
+    recorder_.update(nowMs);
     wifi_.update(nowMs);
     bleKeyboard_.update(nowMs);
     diagnostics_.drainPending();
@@ -278,6 +281,7 @@ App* System::appForId(AppId id) {
     if (id == AppId::Remote) return &remoteApp_;
     if (id == AppId::LoRa) return &loraApp_;
     if (id == AppId::Media) return &mediaApp_;
+    if (id == AppId::Recorder) return &recorderApp_;
     if (id == AppId::Weather) return &weatherApp_;
     if (id == AppId::Settings) return &settingsApp_;
     return nullptr;
@@ -285,11 +289,17 @@ App* System::appForId(AppId id) {
 
 void System::applyResourceProfile(AppId id) {
     const AppResourceProfile next = resourceProfileFor(id);
-    const bool realtimeMedia = next.needs(RuntimeResource::MediaRealtime);
+    const bool realtimeAudio = next.needs(RuntimeResource::MediaRealtime) ||
+                               next.needs(RuntimeResource::RecorderRealtime);
+    const char* realtimeAudioKind = next.needs(RuntimeResource::MediaRealtime)
+                                        ? "MEDIA"
+                                        : (next.needs(RuntimeResource::RecorderRealtime)
+                                               ? "RECORDER"
+                                               : "NONE");
 
     // Stop synchronous TF event writes before shutting down background radios;
     // their one-time disconnect diagnostics are retained in the bounded queue.
-    if (realtimeMedia) sdLog_.setDeferred(true);
+    if (realtimeAudio) sdLog_.setDeferred(true);
 
     const bool bleRequested = next.needs(RuntimeResource::Ble);
     const bool wifiRequested = next.needs(RuntimeResource::Wifi);
@@ -307,14 +317,15 @@ void System::applyResourceProfile(AppId id) {
     lora_.setActive(loraActive);
     activeResources_ = next;
 
-    // Leaving MEDIA happens only after MediaApp::onExit closes the MP3 file, so
-    // flushing queued events cannot contend with an active decoder read.
-    if (!realtimeMedia) sdLog_.setDeferred(false);
+    // Realtime app exit synchronously closes audio files before this profile is
+    // applied, so deferred diagnostics only flush after TF ownership is released.
+    if (!realtimeAudio) sdLog_.setDeferred(false);
     diagnostics_.logf(
         "Resources app=%s BLE=%d WIFI=%d GPS=%d IMU=%d IR=%d LORA=%d LOG=%s",
         appName(id), bleActive ? 1 : 0, wifiActive ? 1 : 0,
         gpsActive ? 1 : 0, imu_.active() ? 1 : 0, ir_.active() ? 1 : 0,
-        loraActive ? 1 : 0, realtimeMedia ? "deferred" : "active");
+        loraActive ? 1 : 0, realtimeAudio ? "deferred" : "active");
+    diagnostics_.logf("Resources realtime-audio=%s", realtimeAudioKind);
 }
 
 void System::openApp(AppId id) {

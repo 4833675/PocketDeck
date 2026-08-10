@@ -15,10 +15,10 @@ public:
     AppId handle(InputAction action);
 
 private:
-    static constexpr std::array<AppId, 9> kApps{
+    static constexpr std::array<AppId, 10> kApps{
         AppId::Keyboard, AppId::Ssh,     AppId::Gps,
         AppId::Motion,   AppId::Remote,  AppId::LoRa,
-        AppId::Media,    AppId::Weather, AppId::Settings,
+        AppId::Media,    AppId::Recorder, AppId::Weather, AppId::Settings,
     };
     uint8_t index_ = 0;
 };

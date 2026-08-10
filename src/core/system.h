@@ -9,6 +9,7 @@
 #include "apps/lora/lora_app.h"
 #include "apps/media/media_app.h"
 #include "apps/motion/motion_app.h"
+#include "apps/recorder/recorder_app.h"
 #include "apps/remote/remote_app.h"
 #include "apps/settings/settings_app.h"
 #include "apps/ssh/ssh_app.h"
@@ -27,6 +28,7 @@
 #include "services/ir_service.h"
 #include "services/lora_service.h"
 #include "services/media_service.h"
+#include "services/recorder_service.h"
 #include "services/sd_log_service.h"
 #include "services/settings_store.h"
 #include "services/ssh_host_store.h"
@@ -70,6 +72,7 @@ private:
     IrService ir_;
     LoRaService lora_;
     MediaService media_;
+    RecorderService recorder_;
     WifiService wifi_;
     WeatherService weather_;
     SdLogService sdLog_;
@@ -88,6 +91,7 @@ private:
     RemoteApp remoteApp_;
     LoRaApp loraApp_;
     MediaApp mediaApp_;
+    RecorderApp recorderApp_;
     WeatherApp weatherApp_;
     SshApp sshApp_;
     SettingsApp settingsApp_;
