@@ -9,8 +9,8 @@ guide; `docs/validation/` holds reusable hardware checklists.
 
 - Repository: `https://github.com/4833675/PocketDeck`; working branch:
   `feature/motion-recorder-ir`; public version remains `0.9.6`.
-- Current integration commit: `d12f8fd` (RECORDER runtime integration). Task 5
-  documentation is pending commit on top of it.
+- RECORDER runtime integration is commit `d12f8fd`; Task 5 documentation was
+  completed in commit `518cb22`.
 - Automated final-integrated evidence: `scripts/test-native.sh` passed 1,587
   checks; `git diff --check` passed; `pio run -e cardputer-adv` passed with RAM
   `104728 / 327680` bytes (32.0%) and flash `2134017 / 3145728` bytes (67.8%).
