@@ -28,6 +28,8 @@ Current firmware: **0.9.6**
 - Four-page GNSS dashboard for the optional M5Stack Cap LoRa-1262.
 - Three-page bilingual MOTION dashboard for the built-in BMI270 accelerometer
   and gyroscope.
+- Dedicated Sony Remote / 索尼遥控 for the Sony KD-65X9100H TV through the
+  Cardputer Adv IR transmitter.
 - Raw LoRa P2P text terminal for a matching SX1262/RadioLib peer.
 - Foreground MP3 player with four-level folder browsing and Chinese filenames
   under `/Music` on a TF card.
@@ -37,8 +39,9 @@ Current firmware: **0.9.6**
 - On-device diagnostics plus privacy-safe event logs for every app/service on a
   TF/microSD card.
 
-Not currently implemented: microphone/dictation, LoRaWAN, IR, SFTP, SSH tunnels,
-MQTT, Home Assistant, OTA updates, or Claude integration.
+Not currently implemented: microphone/dictation, LoRaWAN, generic or other-brand
+IR control, SFTP, SSH tunnels, MQTT, Home Assistant, OTA updates, or Claude
+integration.
 
 ## Hardware
 
@@ -97,8 +100,8 @@ The Cardputer has no dedicated arrow cluster, so local navigation uses Fn:
 | G0 tap | Home |
 | G0 hold for 600 ms | Quick Settings |
 
-Home contains Keyboard, SSH Terminal, GPS, MOTION, LORA, MEDIA, Weather, and
-Settings.
+Home contains Keyboard, SSH Terminal, GPS, MOTION, REMOTE, LORA, MEDIA, Weather,
+and Settings.
 The status bar shows local 24-hour time, `WiFi`, `BT`, and battery percentage.
 Wi-Fi and Bluetooth are mint when connected, amber when active but
 disconnected, red when explicitly disabled, and muted gray when the foreground
@@ -334,6 +337,36 @@ See the [MOTION hardware checklist](docs/validation/motion-smoke-test.md).
 Compilation and native tests do not prove sensor orientation, rates, or gesture
 behavior on a physical device.
 
+## Sony Remote
+
+REMOTE / 遥控器 targets **only Sony KD-65X9100H** through the Cardputer Adv IR
+transmitter. It has no IR receiver or learning mode, supports no other TV brand,
+and does not implement press-and-hold repeat. Every supported key press requests
+one initial Sony transmission plus two repeats.
+
+| Cardputer control | TV action |
+|---|---|
+| Fn + `;` / `,` / `.` / `/` | D-pad Up / Left / Down / Right |
+| Enter | OK |
+| Backspace | TV Back |
+| Bare `` ` `` | Return |
+| `p` | Power |
+| `h` | Home |
+| `i` | Input |
+| `m` | Mute |
+| `-` / `=` | Volume down / up |
+| G0 tap | Exit to Pocket Deck Home |
+
+`SENT / 已发送` means the local IR library call completed. It is **not** a TV
+receipt, acknowledgement, or guarantee that the TV saw or acted on the command.
+For implementation detail, D-pad, OK, and TV Back use Sony device `151` with
+15-bit frames; Return, Power, Home, Input, Mute, and volume use device `1` with
+12-bit frames. Leaving REMOTE with G0 returns Home and releases the IR resource.
+
+See the [Sony Remote hardware checklist](docs/validation/sony-ir-remote-smoke-test.md).
+Do not upload this intermediate build; the final integrated three-app firmware
+will be uploaded later.
+
 ## LoRa text terminal
 
 With the optional Cap LoRa-1262 attached, open LORA from Home. **Attach the Cap
@@ -475,6 +508,7 @@ from diagnostics.
 - [Hardware validation checklists](docs/validation/)
 - [GPS hardware checklist](docs/validation/gps-smoke-test.md)
 - [MOTION hardware checklist](docs/validation/motion-smoke-test.md)
+- [Sony Remote hardware checklist](docs/validation/sony-ir-remote-smoke-test.md)
 - [LoRa text-terminal checklist](docs/validation/lora-text-terminal-smoke-test.md)
 - [MEDIA MP3 checklist](docs/validation/media-mp3-smoke-test.md)
 - [System event-log checklist](docs/validation/system-event-log-smoke-test.md)
@@ -485,7 +519,7 @@ Source layout:
 src/core/       lifecycle, state, policies, input routing, portable models
 src/drivers/    Cardputer board and display adapters
 src/services/   BLE, Wi-Fi, SSH, GPS, LoRa, MEDIA, weather, NVS, TF diagnostics
-src/apps/       launcher, Keyboard, SSH, GPS, MOTION, LORA, MEDIA, Weather, Settings
+src/apps/       launcher, Keyboard, SSH, GPS, MOTION, REMOTE, LORA, MEDIA, Weather, Settings
 src/ui/         shared status bar and Quick Settings
 test/native/    hardware-independent C++ tests
 ```

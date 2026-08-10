@@ -7,18 +7,12 @@ This is the current handoff for the Pocket Deck repository. Read it with
 
 ## Current state
 
-- Repository: `https://github.com/4833675/PocketDeck`; worktree branch
-  `feature/motion-recorder-ir`, public firmware version `0.9.6`.
-- The branch adds MOTION / 运动: built-in BMI270 acceleration and gyroscope only,
-  with LIVE, session-zero LEVEL, and session-peak ACTIVITY pages. It is not a
-  compass: no magnetometer, heading, or raw motion logging exists.
-- Motion sampling is foreground-only at 50 Hz and rendering up to 30 Hz. STILL
-  is `<0.08 g` and `<10 deg/s`; SHAKE is `>=0.45 g` or `>=180 deg/s`, immediate,
-  500 ms latched; data older than 500 ms is shown stale. Physical motion rows pending.
-- Native/target evidence: 1,187 checks, 91,080-byte RAM, 2,108,185-byte flash;
-  not proof of IMU availability, orientation, rate, zero, shake, or isolation.
-- Existing hardware evidence: v0.9.6 SSH over direct Wi-Fi, BLE reconnect,
-  Wi-Fi scan, TF logging, and MEDIA playback; LoRa/GPS/SSH/multi-Wi-Fi pending.
+- Repository: `https://github.com/4833675/PocketDeck`; branch `feature/motion-recorder-ir`, public firmware `0.9.6`.
+- The branch adds MOTION / 运动: built-in BMI270 acceleration and gyroscope with LIVE, session-zero LEVEL, and session-peak ACTIVITY; no compass, heading, or raw motion log.
+- It also adds REMOTE / 遥控器 for Sony KD-65X9100H only: every mapped press requests one initial Sony frame plus two repeats; `SENT / 已发送` proves only the local call, never TV receipt, and there is no receive, learning, other-brand, or hold-repeat support.
+- Motion is foreground-only at 50 Hz / up to 30 Hz render. STILL is `<0.08 g` and `<10 deg/s`; SHAKE is `>=0.45 g` or `>=180 deg/s`, immediate, 500 ms latched; stale is over 500 ms. Physical motion rows pending.
+- Native/target evidence: 1,340 checks, 91,096-byte RAM, 2,115,145-byte flash; not proof of physical IR, TV receipt, IMU availability, orientation, rate, zero, shake, or isolation.
+- Existing hardware: v0.9.6 SSH over direct Wi-Fi, BLE reconnect, Wi-Fi scan, TF logging, and MEDIA playback; LoRa/GPS/SSH/multi-Wi-Fi pending.
 
 ## Product identity
 
@@ -32,6 +26,8 @@ Current apps and services:
 - Runtime English / Chinese across every app, Settings, and Quick Settings.
 - MOTION / 运动: foreground-only BMI270 accelerometer + gyroscope dashboard;
   no magnetometer/compass, persistent calibration, or raw sample logging.
+- REMOTE / 遥控器: Sony KD-65X9100H IR controls only; no receiver, learner,
+  other-brand support, hold-repeat, or TV acknowledgement.
 - Secure single-host BLE keyboard for macOS, implemented with NimBLE-Arduino
   1.4.3 and a six-digit display-only pairing flow.
 - Runtime English / Simplified Chinese four-page GPS dashboard for the optional
@@ -45,7 +41,7 @@ Current apps and services:
 - Quick Settings, Preferences/NVS settings, on-device diagnostics, and unified
   privacy-safe TF event logs with USB serial dump commands.
 - No microphone/dictation, Claude integration, LoRaWAN, encryption/ACK/retry,
-  IR, SFTP, SSH tunnels, MQTT, or Home Assistant feature yet.
+  generic IR, SFTP, SSH tunnels, MQTT, or Home Assistant feature yet.
 
 ## Hardware facts
 
