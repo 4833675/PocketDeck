@@ -11,6 +11,7 @@ namespace pd {
 class BleKeyboardService;
 class DiagnosticsService;
 class GpsService;
+class ImuService;
 class LoRaService;
 class MediaService;
 class SdLogService;
@@ -65,6 +66,7 @@ struct SystemContext {
     const char* resetReason = "unknown";
     BleKeyboardService* bleKeyboard = nullptr;
     GpsService* gps = nullptr;
+    ImuService* imu = nullptr;
     LoRaService* lora = nullptr;
     MediaService* media = nullptr;
     WifiService* wifi = nullptr;
