@@ -15,6 +15,7 @@
 #include "apps/lora/lora_app_text.h"
 #include "apps/media/media_app_model.h"
 #include "apps/media/media_app_text.h"
+#include "apps/motion/motion_app_model.h"
 #include "apps/settings/settings_model.h"
 #include "apps/settings/settings_app_text.h"
 #include "apps/weather/weather_app_text.h"
@@ -2058,6 +2059,54 @@ TEST_CASE(media_volume_request_is_explicit_and_consumed_once) {
     CHECK(!context.takeVolumeDelta(delta));
 }
 
+TEST_CASE(motion_app_navigates_three_pages_and_wraps) {
+    MotionAppModel model;
+    CHECK_EQ(model.page(), MotionPage::Live);
+
+    CHECK_EQ(model.handle(InputAction::Tab).effect, MotionAppEffect::None);
+    CHECK_EQ(model.page(), MotionPage::Level);
+    CHECK_EQ(model.handle(InputAction::Right).effect, MotionAppEffect::None);
+    CHECK_EQ(model.page(), MotionPage::Activity);
+    model.handle(InputAction::Right);
+    CHECK_EQ(model.page(), MotionPage::Live);
+
+    model.handle(InputAction::Left);
+    CHECK_EQ(model.page(), MotionPage::Activity);
+    model.handle(InputAction::Left);
+    CHECK_EQ(model.page(), MotionPage::Level);
+    model.handle(InputAction::Left);
+    CHECK_EQ(model.page(), MotionPage::Live);
+
+    model.handle(InputAction::Up);
+    CHECK_EQ(model.page(), MotionPage::Live);
+    model.handle(InputAction::Down);
+    CHECK_EQ(model.page(), MotionPage::Live);
+}
+
+TEST_CASE(motion_app_confirm_emits_page_specific_one_shot_effects) {
+    MotionAppModel model;
+    CHECK_EQ(model.handle(InputAction::Confirm).effect, MotionAppEffect::None);
+
+    model.handle(InputAction::Tab);
+    CHECK_EQ(model.page(), MotionPage::Level);
+    CHECK_EQ(model.handle(InputAction::Confirm).effect, MotionAppEffect::ZeroLevel);
+    CHECK_EQ(model.handle(InputAction::None).effect, MotionAppEffect::None);
+
+    model.handle(InputAction::Right);
+    CHECK_EQ(model.page(), MotionPage::Activity);
+    CHECK_EQ(model.handle(InputAction::Confirm).effect, MotionAppEffect::ResetPeak);
+    CHECK_EQ(model.handle(InputAction::None).effect, MotionAppEffect::None);
+}
+
+TEST_CASE(motion_app_back_requests_home_without_changing_page) {
+    MotionAppModel model;
+    model.handle(InputAction::Left);
+    CHECK_EQ(model.page(), MotionPage::Activity);
+    CHECK_EQ(model.handle(InputAction::Back).effect, MotionAppEffect::GoHome);
+    CHECK_EQ(model.page(), MotionPage::Activity);
+    CHECK_EQ(model.handle(InputAction::None).effect, MotionAppEffect::None);
+}
+
 TEST_CASE(motion_level_uses_roll_pitch_formula_and_alpha_filter) {
     MotionClassifier classifier;
     classifier.update(MotionSample{0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f}, 0);
@@ -2293,6 +2342,9 @@ int main() {
     media_progress_and_elapsed_clock_are_bounded_and_wrap_safe();
     media_app_maps_library_playback_volume_rescan_and_home();
     media_volume_request_is_explicit_and_consumed_once();
+    motion_app_navigates_three_pages_and_wraps();
+    motion_app_confirm_emits_page_specific_one_shot_effects();
+    motion_app_back_requests_home_without_changing_page();
     motion_level_uses_roll_pitch_formula_and_alpha_filter();
     motion_exposes_acceleration_and_gyro_magnitudes();
     motion_still_thresholds_are_strict();
