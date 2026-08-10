@@ -2067,19 +2067,19 @@ TEST_CASE(motion_app_navigates_three_pages_and_wraps) {
     CHECK_EQ(model.page(), MotionPage::Level);
     CHECK_EQ(model.handle(InputAction::Right).effect, MotionAppEffect::None);
     CHECK_EQ(model.page(), MotionPage::Activity);
-    model.handle(InputAction::Right);
+    CHECK_EQ(model.handle(InputAction::Right).effect, MotionAppEffect::None);
     CHECK_EQ(model.page(), MotionPage::Live);
 
-    model.handle(InputAction::Left);
+    CHECK_EQ(model.handle(InputAction::Left).effect, MotionAppEffect::None);
     CHECK_EQ(model.page(), MotionPage::Activity);
-    model.handle(InputAction::Left);
+    CHECK_EQ(model.handle(InputAction::Left).effect, MotionAppEffect::None);
     CHECK_EQ(model.page(), MotionPage::Level);
-    model.handle(InputAction::Left);
+    CHECK_EQ(model.handle(InputAction::Left).effect, MotionAppEffect::None);
     CHECK_EQ(model.page(), MotionPage::Live);
 
-    model.handle(InputAction::Up);
+    CHECK_EQ(model.handle(InputAction::Up).effect, MotionAppEffect::None);
     CHECK_EQ(model.page(), MotionPage::Live);
-    model.handle(InputAction::Down);
+    CHECK_EQ(model.handle(InputAction::Down).effect, MotionAppEffect::None);
     CHECK_EQ(model.page(), MotionPage::Live);
 }
 
