@@ -43,9 +43,14 @@ pio device monitor -e cardputer-adv
 - Optional Cap LoRa-1262 GPS uses UART RX GPIO15, TX GPIO13, 115200 baud.
 - TF logging shares SPI pins with the Cap. Keep the Cap chip-select inactive and
   avoid long-lived open files.
-- MEDIA is the one intentional exception: it may keep one read-only MP3 file
-  open only while foreground playback is active. Audio/SD work stays on the main
-  task and the file must close before mount, format, or app exit.
+- MEDIA is one intentional long-lived audio/TF exception: it may keep one
+  read-only MP3 file open only while foreground playback is active. Audio/SD
+  work stays on the main task and the file must close before mount, format, or
+  app exit.
+- RECORDER is the second intentional long-lived audio/TF exception: it may keep
+  one WAV file open only while foreground record or playback is active. It uses
+  exactly two 1,024-sample capture buffers, never mounts or formats TF, owns Mic
+  or Speaker exclusively, and must synchronously finalize/close before app exit.
 - MEDIA browses at most four folder levels and stores at most 64 entries from
   the current folder. Folder changes close playback first; Chinese names use
   the built-in M5GFX font and must not introduce a LittleFS dependency.
@@ -78,7 +83,8 @@ pio device monitor -e cardputer-adv
 - BLE HID accepts one bonded host and sends reports only from the foreground
   Keyboard app over an authenticated, encrypted link.
 - Never log typed characters, HID reports, Wi-Fi passwords, pairing passkeys, or
-  precise GPS coordinates. MEDIA also never logs track filenames or audio data.
+  precise GPS coordinates. MEDIA and RECORDER never log filenames or audio data;
+  RECORDER also excludes waveform/level values and recorded content.
 - Wi-Fi owns up to eight profiles in the `pocketwifi` NVS namespace. Arduino
   persistence and automatic reconnect stay disabled; `WifiService` controls
   scan, selection, fallback, and retry.

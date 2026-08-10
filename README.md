@@ -3,8 +3,8 @@
 Pocket Deck is standalone, keyboard-first firmware for the **M5Stack Cardputer
 Adv** (Stamp-S3A, 240×135 display, 8 MB flash). It turns the device into a small
 system deck with a secure macOS Bluetooth keyboard, Pocket SSH terminal, GPS,
-LoRa, TF-card MP3 playback, multi-profile Wi-Fi, time, weather, settings, and
-diagnostics.
+LoRa, TF-card MP3 playback and WAV recording, multi-profile Wi-Fi, time,
+weather, settings, and diagnostics.
 
 It is a from-scratch project, not a Claude Desktop Buddy fork, and it does not
 support the original Cardputer model.
@@ -33,15 +33,18 @@ Current firmware: **0.9.6**
 - Raw LoRa P2P text terminal for a matching SX1262/RadioLib peer.
 - Foreground MP3 player with four-level folder browsing and Chinese filenames
   under `/Music` on a TF card.
+- Foreground WAV recorder/player under `/Recordings`, with a live level display
+  and bounded recording list.
 - Foreground resource profiles: each app runs only the radios and peripherals
-  it needs; MEDIA suspends wireless/GPS/LoRa work and defers TF event writes.
+  it needs; MEDIA and RECORDER suspend wireless/GPS/LoRa work and defer TF
+  event writes while their audio activity is foreground.
 - Versioned Preferences/NVS settings and confirmed destructive actions.
 - On-device diagnostics plus privacy-safe event logs for every app/service on a
   TF/microSD card.
 
-Not currently implemented: microphone/dictation, LoRaWAN, generic or other-brand
-IR control, SFTP, SSH tunnels, MQTT, Home Assistant, OTA updates, or Claude
-integration.
+Not currently implemented: microphone dictation/transcription, LoRaWAN, generic
+or other-brand IR control, SFTP, SSH tunnels, MQTT, Home Assistant, OTA updates,
+or Claude integration.
 
 ## Hardware
 
@@ -53,7 +56,8 @@ Required:
 Optional:
 
 - M5Stack Cap LoRa-1262 for GPS, location-based weather, and LoRa P2P
-- FAT-formatted TF/microSD card for MP3 playback and persistent diagnostics
+- FAT-formatted TF/microSD card for MP3 playback, WAV recording, and persistent
+  diagnostics
 
 The target has no PSRAM. The firmware uses one 3 MB application partition and
 has no OTA slot. No LittleFS assets are currently required.
@@ -100,8 +104,8 @@ The Cardputer has no dedicated arrow cluster, so local navigation uses Fn:
 | G0 tap | Home |
 | G0 hold for 600 ms | Quick Settings |
 
-Home contains Keyboard, SSH Terminal, GPS, MOTION, REMOTE, LORA, MEDIA, Weather,
-and Settings.
+Home contains Keyboard, SSH Terminal, GPS, MOTION, REMOTE, LORA, MEDIA,
+RECORDER, Weather, and Settings.
 The status bar shows local 24-hour time, `WiFi`, `BT`, and battery percentage.
 Wi-Fi and Bluetooth are mint when connected, amber when active but
 disconnected, red when explicitly disabled, and muted gray when the foreground
@@ -422,6 +426,43 @@ loop. MP3 decoding uses
 which is GPL-3.0 software; comply with that license when distributing firmware
 binaries.
 
+## RECORDER WAV recorder
+
+RECORDER / 录音机 records the built-in microphone to the existing, mounted TF
+card and plays its recordings through the Cardputer Adv speaker or 3.5 mm audio
+output. It creates `/Recordings` when the card is mounted, but never mounts,
+formats, repairs, or otherwise changes the card's filesystem itself.
+
+Each recording is standard RIFF/WAVE PCM: mono, signed 16-bit, 16 kHz. The data
+rate is **32 KB/s**, or approximately **115 MB/hour**. The recorder streams with
+fixed buffers rather than keeping a whole recording in RAM, which matters on
+this no-PSRAM device. Up to 64 recordings are displayed, newest filename first.
+
+| Control | RECORDER action |
+|---|---|
+| Enter on Record | Start recording; press Enter again to stop and finalize the WAV |
+| Tab | Switch between Record and Files when audio is idle |
+| Fn + Up / Down on Files | Select the previous / next recording |
+| Enter on Files | Start playback of a compatible recording; press again to stop |
+| `d` on Files | Open the separate delete confirmation |
+| Enter on delete confirmation | Delete the selected recording |
+| Backspace on delete confirmation | Cancel deletion |
+| Backspace or G0 otherwise | Return Home; active recording/playback is stopped and finalized first |
+
+This release plays only the PCM WAV format it records. Compressed, multichannel,
+other-rate, or malformed WAV files show an unsupported/damaged status instead of
+being converted. Recording and playback are foreground-only: while either is
+active, competing radios, GPS, LoRa work, and TF diagnostic writes are deferred;
+leaving RECORDER restores normal audio and system work after synchronous cleanup.
+
+Diagnostics contain only recorder lifecycle, categorical errors, and aggregate
+byte/duration totals. Recording filenames, audio samples, waveform values, and
+recorded content are never written to diagnostics.
+
+See the [RECORDER hardware checklist](docs/validation/recorder-smoke-test.md).
+Compilation and native tests do not prove microphone capture, card behavior, or
+speaker/AUX playback on a physical device.
+
 ## Diagnostics and TF card
 
 Settings > System > Diagnostics shows reset reason, memory and recent events.
@@ -432,9 +473,10 @@ For persistent history, insert a TF card and restart. The active log is
 `LOG DUMP ALL`.
 
 Logging is event-based rather than frame- or keystroke-based. It records boot,
-application switches, MEDIA scans/folder depth/playback state, BLE, Wi-Fi, GPS
-receiver health, weather, SSH, LoRa, Settings, and TF storage events without
-adding continuous SD writes to the main loop.
+application switches, MEDIA scans/folder depth/playback state, RECORDER
+lifecycle/error categories and aggregate totals, BLE, Wi-Fi, GPS receiver health,
+weather, SSH, LoRa, Settings, and TF storage events without adding continuous SD
+writes to the main loop.
 
 Settings > System > TF card logs can retry mounting or format the card after a
 separate confirmation. Formatting erases the entire card.
@@ -450,8 +492,8 @@ Logs can be read over USB without removing the card:
 | `LOG CLEAR YES` | Erase all logs and start a new session |
 
 Typed keyboard/SSH content, Wi-Fi passwords, pairing codes, precise GPS
-coordinates, MEDIA filenames/audio, and LoRa payloads are deliberately excluded
-from diagnostics.
+coordinates, MEDIA/RECORDER filenames or audio, and LoRa payloads are
+deliberately excluded from diagnostics.
 
 ## Reset and stored data
 
@@ -481,6 +523,10 @@ from diagnostics.
   0.7.0 cannot see nested folders.
 - **MEDIA says `OUT OF MEMORY`:** restart Pocket Deck before playing, especially
   after opening SSH; the device has no PSRAM.
+- **RECORDER says `NO TF CARD`:** mount the existing card under Settings > System
+  > TF card logs, then reopen RECORDER. RECORDER never formats or mounts a card.
+- **RECORDER says `UNSUPPORTED WAV`:** it plays only mono, signed 16-bit, 16 kHz
+  PCM WAV files made by this app; use a compatible file or re-record it.
 - **Weather will not update:** verify a fresh GPS fix, Wi-Fi/IP, and NTP, then
   press Enter in Weather.
 - **SSH key missing:** rebuild with a readable `POCKETDECK_SSH_KEY` path or
@@ -509,6 +555,7 @@ from diagnostics.
 - [GPS hardware checklist](docs/validation/gps-smoke-test.md)
 - [MOTION hardware checklist](docs/validation/motion-smoke-test.md)
 - [Sony Remote hardware checklist](docs/validation/sony-ir-remote-smoke-test.md)
+- [RECORDER hardware checklist](docs/validation/recorder-smoke-test.md)
 - [LoRa text-terminal checklist](docs/validation/lora-text-terminal-smoke-test.md)
 - [MEDIA MP3 checklist](docs/validation/media-mp3-smoke-test.md)
 - [System event-log checklist](docs/validation/system-event-log-smoke-test.md)
@@ -518,8 +565,8 @@ Source layout:
 ```text
 src/core/       lifecycle, state, policies, input routing, portable models
 src/drivers/    Cardputer board and display adapters
-src/services/   BLE, Wi-Fi, SSH, GPS, LoRa, MEDIA, weather, NVS, TF diagnostics
-src/apps/       launcher, Keyboard, SSH, GPS, MOTION, REMOTE, LORA, MEDIA, Weather, Settings
+src/services/   BLE, Wi-Fi, SSH, GPS, LoRa, MEDIA, RECORDER, weather, NVS, TF diagnostics
+src/apps/       launcher, Keyboard, SSH, GPS, MOTION, REMOTE, LORA, MEDIA, RECORDER, Weather, Settings
 src/ui/         shared status bar and Quick Settings
 test/native/    hardware-independent C++ tests
 ```

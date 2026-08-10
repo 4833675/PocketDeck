@@ -2,194 +2,156 @@
 
 Last updated: 2026-08-10
 
-This is the current handoff for the Pocket Deck repository. Read it with
-`AGENTS.md`; use `README.md` for public usage instructions.
+Read this with `AGENTS.md` before substantial work. `README.md` is the public
+guide; `docs/validation/` holds reusable hardware checklists.
 
 ## Current state
 
-- Repository: `https://github.com/4833675/PocketDeck`; branch `feature/motion-recorder-ir`, public firmware `0.9.6`.
-- The branch adds MOTION / 运动: built-in BMI270 acceleration and gyroscope with LIVE, session-zero LEVEL, and session-peak ACTIVITY; no compass, heading, or raw motion log.
-- It also adds REMOTE / 遥控器 for Sony KD-65X9100H only: every mapped press requests one initial Sony frame plus two repeats; `SENT / 已发送` proves only the local call, never TV receipt, and there is no receive, learning, other-brand, or hold-repeat support.
-- Motion is foreground-only at 50 Hz / up to 30 Hz render. STILL is `<0.08 g` and `<10 deg/s`; SHAKE is `>=0.45 g` or `>=180 deg/s`, immediate, 500 ms latched; stale is over 500 ms. Physical motion rows pending.
-- Native/target evidence: 1,340 checks, 91,096-byte RAM, 2,115,145-byte flash; not proof of physical IR, TV receipt, IMU availability, orientation, rate, zero, shake, or isolation.
-- Existing hardware: v0.9.6 SSH over direct Wi-Fi, BLE reconnect, Wi-Fi scan, TF logging, and MEDIA playback; LoRa/GPS/SSH/multi-Wi-Fi pending.
+- Repository: `https://github.com/4833675/PocketDeck`; working branch:
+  `feature/motion-recorder-ir`; public version remains `0.9.6`.
+- Current integration commit: `d12f8fd` (RECORDER runtime integration). Task 5
+  documentation is pending commit on top of it.
+- Automated final-integrated evidence: `scripts/test-native.sh` passed 1,587
+  checks; `git diff --check` passed; `pio run -e cardputer-adv` passed with RAM
+  `104728 / 327680` bytes (32.0%) and flash `2134017 / 3145728` bytes (67.8%).
+  This is source/build evidence only, not physical hardware proof.
+- Physical Recorder checks are all pending. Do not infer microphone capture,
+  WAV finalization, speaker/AUX playback, recovery, resource isolation, or
+  cross-app behavior from a build.
+- Existing hardware history: v0.9.6 SSH over direct Wi-Fi, BLE range-loss
+  reconnect, Wi-Fi scan, TF logging, and MEDIA playback have been observed.
+  LoRa, GPS, SSH breadth, multi-Wi-Fi, MOTION, REMOTE, and RECORDER checklists
+  still contain pending rows until directly observed.
 
-## Product identity
+## Product and hardware
 
-Pocket Deck is a from-scratch, keyboard-first system shell for the **M5Stack
-Cardputer Adv**. It is not a Claude Desktop Buddy fork. The archived buddy
-firmware may remain in a sibling `../claude-desktop-buddy-cardputer` repository
-and must remain untouched unless explicitly selected.
+- Pocket Deck is from-scratch keyboard-first firmware for **M5Stack Cardputer
+  Adv** only, not a Claude Desktop Buddy fork. Preserve sibling archived buddy
+  repositories.
+- Target: Stamp-S3A / ESP32-S3FN8, 8 MB flash, about 320 KB SRAM, **no PSRAM**,
+  240×135 display. Partitioning has one 3 MB app and no OTA slot.
+- The exact-color 8-bit display buffer was chosen to leave enough runtime heap
+  for RSA-backed SSH. Avoid whole-file buffers, unbounded containers, or extra
+  tasks without a new memory budget and hardware proof.
+- BLE and Wi-Fi share 2.4 GHz airtime; only 2.4 GHz Wi-Fi is usable.
+- Optional Cap LoRa-1262 provides GNSS and SX1262 LoRa. GNSS UART is RX GPIO15 /
+  TX GPIO13 at 115200. LoRa and TF share SPI; keep inactive chip-select lines
+  high and perform work on the main system task.
+- Native USB Serial/JTAG re-enumerates after reset, so persistent TF logs are
+  more reliable than a late-attached serial monitor for early boot history.
 
-Current apps and services:
+## Apps and services
 
-- Runtime English / Chinese across every app, Settings, and Quick Settings.
-- MOTION / 运动: foreground-only BMI270 accelerometer + gyroscope dashboard;
-  no magnetometer/compass, persistent calibration, or raw sample logging.
-- REMOTE / 遥控器: Sony KD-65X9100H IR controls only; no receiver, learner,
-  other-brand support, hold-repeat, or TV acknowledgement.
-- Secure single-host BLE keyboard for macOS, implemented with NimBLE-Arduino
-  1.4.3 and a six-digit display-only pairing flow.
-- Runtime English / Simplified Chinese four-page GPS dashboard for the optional
-  Cap LoRa-1262, including motion validity and stale-data handling.
-- Raw LoRa P2P text terminal for the Cap SX1262 and a matching RadioLib peer.
-- Foreground MEDIA player with four folder levels, 64 entries per current
-  folder, Chinese filenames, ESP8266Audio 2.2.0, and speaker/AUX output.
-- Wi-Fi manager with eight profiles, NTP clock, and bilingual GPS-local Open-Meteo weather.
-- Pocket SSH Terminal with six NVS host entries, one PTY shell, public-key auth,
-  40×13 ANSI display, 64-line scrollback, reconnect, and quick commands.
-- Quick Settings, Preferences/NVS settings, on-device diagnostics, and unified
-  privacy-safe TF event logs with USB serial dump commands.
-- No microphone/dictation, Claude integration, LoRaWAN, encryption/ACK/retry,
-  generic IR, SFTP, SSH tunnels, MQTT, or Home Assistant feature yet.
+- Runtime English/Simplified Chinese covers all product-owned UI. Preserve
+  commands, protocol values, filenames, radio payloads, metrics, and raw logs.
+  English uses `Font0`; Chinese reuses linked `efontCN_14`. Do not add another
+  CJK font or a permanent language branch without a budget decision.
+- Keyboard: NimBLE HID, one bonded Mac, authenticated/encrypted foreground-only
+  reports, all-keys-up reconnect gate. Do not casually return to Bluedroid.
+- Wi-Fi: eight successful profiles, strongest-known candidate selection and
+  fallback; credentials persist only after `WL_CONNECTED` and are never logged.
+- GPS/Weather: four GPS pages, NTP clock, GPS-local Open-Meteo cache in RAM.
+  `RX CHARS` alone is not valid NMEA; use checksum counters and UTC.
+- MOTION / 运动: foreground-only BMI270 accel+gyro dashboard, no compass or raw
+  logs. Sample no faster than 20 ms; stale after 500 ms. STILL is below both
+  `0.08 g` and `10 deg/s`; SHAKE is at least either `0.45 g` or `180 deg/s`,
+  immediate and latched 500 ms; other changes need five candidate samples.
+- REMOTE / 遥控器: fixed Sony KD-65X9100H IR only. Each press is initial frame
+  plus two repeats. `SENT / 已发送` is local-call status, never TV receipt; no
+  receiver, learner, other-brand mode, or hold repeat exists.
+- LORA: lazy foreground raw P2P only: 868.0 MHz, 125 kHz, SF12, 4/5, `0x34`,
+  +22 dBm, 20-symbol preamble, 3.0 V TCXO, 140 mA. No LoRaWAN, encryption, ACK,
+  retry, persistence, or hidden TX queue. Attach antenna before initialization.
+- MEDIA: `/Music`, four folder levels, up to 64 current-folder entries, Chinese
+  names, foreground MP3 only. It owns Speaker while active and releases it
+  before folder change or exit. Recommend 128 kbps / 44.1 kHz.
+- RECORDER / 录音机: `/Recordings`; RIFF/WAVE PCM mono signed-16 16 kHz,
+  32 KB/s (about 115 MB/hour). It displays at most 64 regular `.WAV` files,
+  newest filename first, and plays only its own format.
+- SSH: six host entries, public-key auth, one 40×13 PTY and 64-line scrollback.
+  Host-key verification is deliberately OFF in this prototype; do not describe
+  it as secure on an untrusted network. The key is external at build time but
+  embedded in firmware; never commit, print, or publish it.
 
-## Hardware facts
+## Architecture and ownership
 
-- ESP32-S3FN8 / Stamp-S3A, 8 MB flash, no PSRAM, 240×135 display.
-- Partition layout: NVS + one 3 MB app + LittleFS; no OTA slot.
-- Keyboard: TCA8418 matrix through M5Cardputer 1.1.1.
-- GPS Cap: NMEA UART at 115200, Cardputer RX GPIO15 / TX GPIO13.
-- Built-in IMU: BMI270 accelerometer + gyroscope; active only for MOTION.
-- BLE/Wi-Fi share 2.4 GHz airtime; ESP32-S3 cannot see 5 GHz-only SSIDs.
-- SX1262 uses NSS G5, DIO1 G4, reset G3, busy G6 and shared SPI G40/G14/G39.
-  TF CS is G12; inactive chip selects stay high and all radio calls run from the
-  main system task. The DIO1 callback only sets a volatile flag.
-- The Cap antenna switch is PI4IOE5V6408 at I2C `0x43`, P0 high before radio
-  initialization. An antenna must be attached before LoRa initialization or TX.
-- Native USB Serial/JTAG may disappear briefly on reset and miss early app logs.
+- `src/core/` is portable models/policies; `src/services/` owns hardware-facing
+  state; `src/apps/` owns UI/input; `System` owns lifecycle/resource changes.
+  Apps request work through `SystemContext`, not direct radio/storage drivers.
+- Fixed arrays and explicit state machines are preferred to heap allocation and
+  blocking loops. Native tests should cover new portable policy/model behavior.
+- Resource profiles turn on only what a foreground app requires. MEDIA and
+  RECORDER realtime modes suspend BLE, Wi-Fi, GPS, and LoRa work and defer TF
+  diagnostics; deferred diagnostics flush only after active audio files close.
+- MEDIA is one intentional long-lived audio/TF exception: one read-only MP3 may
+  stay open only during foreground playback.
+- RECORDER is the second intentional long-lived audio/TF exception. It uses the
+  already-mounted SD instance only: no remount, format, repair, extra task,
+  `String`, vector, or whole-recording allocation.
+- RECORDER owns Mic or Speaker exclusively. It has exactly two 1,024-sample
+  capture buffers and three fixed playback buffers. Start record stops Speaker;
+  stop/error/exit drains safely, ends Mic, finalizes/closes WAV, restores Speaker
+  and persisted volume before the next app profile applies.
+- Recorder starts with a placeholder 44-byte WAV header, tracks successful PCM
+  bytes, and checkpoints header/flush every 64 KiB (about two seconds). Normal
+  stop, recoverable error, and app exit finalize synchronously. A sudden power
+  loss can lose the final in-flight buffer but should leave the latest checkpoint
+  length usable.
+- Recorder diagnostics are categorical lifecycle/error events plus aggregate
+  byte/duration totals. Never log filenames, directory listings, audio samples,
+  waveform/level values, recorded content, typed text, passwords, passkeys,
+  precise coordinates, or LoRa payloads.
+- Upstream limitations: Arduino `File::flush()` has no result, M5Unified hides
+  task-create success, and the conservative Mic wake timeout may drop an
+  unobserved completed block rather than risk writing a buffer still owned by Mic.
 
-## Architecture map
+## Important operational lessons
 
-- Entry and lifecycle: `src/main.cpp`, `src/core/system.*`.
-- Input/privacy routing: `src/core/input_router.*`, `mac_keymap.*`,
-  `text_keymap.*`.
-- BLE HID: `src/services/ble_keyboard_service.*`.
-- Wi-Fi state machine: `src/services/wifi_service.*`.
-- Wi-Fi profile model/store: `src/core/wifi_profiles.*`,
-  `src/services/wifi_profile_store.*`.
-- GPS/weather: `src/services/gps_service.*`, `weather_service.*`.
-- IMU/MOTION: `src/services/imu_service.*`, `src/core/motion_data.*`, and
-  `src/apps/motion/`.
-- LoRa: `src/core/lora_data.*`, `src/services/lora_service.*`, and
-  `src/apps/lora/`; `System` owns the service and calls its update loop.
-- MEDIA: `src/core/media_data.*`, `src/services/media_service.*`, and
-  `src/apps/media/`; playback objects exist only while a track is loaded.
-- SSH: `src/core/ssh_*`, `terminal_*`, `src/services/ssh_*`, and
-  `src/apps/ssh/`. Build-time key generation is `scripts/embed_ssh_key.py`.
-- UI/apps: `src/apps/`, `src/ui/`, `src/drivers/display.*`.
-- Persistent diagnostics: `src/services/diagnostics_service.*`,
-  `sd_log_service.*`.
-- Durable decisions: `docs/architecture/`.
-- Hardware checks: `docs/validation/`.
-
-## Important invariants and lessons
-
-- Keyboard input is forwarded only while Keyboard is foreground and BLE is
-  encrypted. Local screens must consume their own keys.
-- A reconnect starts with an all-keys-up gate; never replay keys held while the
-  Mac was disconnected.
-- The BLE identity is stable and only one Mac bond is accepted. The NimBLE
-  migration fixed bond loss after leaving radio range; do not casually return
-  this service to Bluedroid.
-- Wi-Fi credentials are never logged or included in UI snapshots. New profiles
-  are persisted only after connection succeeds.
-- Before a disconnected scan, cancel a pending association and retry scan start
-  while the ESP-IDF driver settles. The previous one-profile implementation
-  repeatedly returned `WIFI_SCAN_FAILED` in this state.
-- Automatic Wi-Fi candidates must be built from all raw scan records, not only
-  the strongest eight shown on screen.
-- Weather keeps the last successful response in RAM when GPS or Wi-Fi vanishes;
-  only refreshing requires fresh inputs.
-- GPS `RX CHARS` alone does not prove valid NMEA. Use checksum OK/ERR and UTC to
-  distinguish signal acquisition from serial corruption.
-- MOTION reads accel+gyro only in its foreground profile, at a 20 ms minimum
-  interval; normal render is 33 ms. Never add compass claims or raw diagnostics.
-- LEVEL zero and ACTIVITY peak reset are RAM-only. STILL is strict below both
-  0.08 g/10 deg/s, SHAKE inclusive at either 0.45 g/180 deg/s and latches 500 ms;
-  non-shake changes require five candidate samples.
-- LoRa uses RadioLib 7.7.1 raw P2P only: 868.0 MHz, 125.0 kHz, SF12, 4/5,
-  `0x34`, +22 dBm, 20-symbol preamble, 3.0 V TCXO, 140 mA. No custom header,
-  encryption, addressing, ACK, retry, persistence, notification, or hidden TX
-  queue exists. Do not log drafts, payloads, or message history.
-- LoRa initializes lazily on first app entry, listens only while its app is
-  foreground, and enters warm sleep with its DIO1 IRQ detached on exit.
-  Missing Cap/error must not block GPS, TF, BLE, Wi-Fi, weather, or SSH. RX/TX
-  payloads are bounded to 120 printable-ASCII bytes; RX is sanitized and
-  oversize input drops. Keep six in-RAM records only.
-- MEDIA starts at `/Music`, enters folders one level at a time to depth four,
-  keeps 64 fixed-size entries from only the current folder, never remounts TF,
-  and stops/releases playback before folder changes or app exit. Chinese names
-  use built-in `efontCN_14`; never log filenames or audio content.
-- MEDIA uses M5's 1,536-sample speaker buffers and renders at 10 Hz to reduce
-  underruns. Recommend 128 kbps / 44.1 kHz; hardware confirmation is pending.
-- Runtime language uses one settings flag and compile-time literals. English
-  uses `Font0`; Chinese reuses the already-linked `efontCN_14`. Do not add a new
-  CJK font size or permanent language branch without a separate budget decision.
-- Every new product UI ships English and Chinese together unless technically impossible; document exceptions.
-- Preserve commands, protocols, user data, RF/GPS metrics, and raw logs when translation risks changing meaning.
-- TF logging normally closes each event so unexpected power loss does not strand
-  a long buffered session. MEDIA uses a 12-event categorical deferred queue and
-  flushes after its MP3 file closes. `system.log` rotates at 4 MB through three archives; legacy
-  `ble*.log` remains dump/clear compatible. Log state changes, never hot loops,
-  key/terminal text, passwords, exact coordinates, filenames, or radio payloads.
-- The repository never contains the SSH private key. PlatformIO reads an
-  external text key and generates its array only under ignored `.pio/`; the
-  resulting firmware binary does contain the key and must not be shared.
-- SSH host-key verification is deliberately OFF in this prototype. Do not call
-  it secure on untrusted networks; TOFU fingerprint storage is the next security
-  step. Factory reset clears host records but cannot remove a compiled key.
-- SSH uses `aes128-ctr` and 1,024-byte libssh reads; handshake milestones stay in
-  RAM until failure. Only pending Wi-Fi auto-retries; other failures wait for Enter.
-- libssh runs in one lazy FreeRTOS worker with a 20,480-byte stack, 512-byte TX
-  stream, and 1,024-byte RX stream. The generated private key is parsed once at
-  task startup and cached for reconnects; parsing it after key exchange failed at
-  the heap low-water point. Never call libssh directly from an app or log
-  terminal input/output.
-- v0.9.2/v0.9.5 logs proved RSA auth was nondeterministic at 13.5 KB free heap.
-  v0.9.6's exact-color 8-bit indexed buffer recovers 31,632 runtime bytes without
-  shrinking the 20,480-byte SSH stack. Real hardware reached `CONNECTED` and
-  opened a shell with 41,240 bytes free and a 23,540-byte largest block.
+- Before a disconnected Wi-Fi scan, cancel pending association and retry scan
+  start while ESP-IDF settles. Build automatic candidates from all raw results,
+  not just the eight visible rows.
+- Weather retains the last successful response in RAM when GPS/Wi-Fi vanishes;
+  only a refresh needs fresh inputs.
+- LoRa initializes on first app entry, listens only foreground, then warm-sleeps
+  on exit. Missing Cap/error must not block GPS, TF, BLE, Wi-Fi, Weather, or SSH.
+- TF logs are state-change only, rotate at 4 MB through three archives, and
+  normally close each event. Do not add per-frame, per-key, audio, terminal,
+  filename, or payload logging.
+- SSH uses `aes128-ctr`, 1,024-byte reads, a lazy 20,480-byte worker stack,
+  512-byte TX and 1,024-byte RX streams. Parsing the compiled key once at task
+  startup avoids a post-key-exchange heap low point.
+- v0.9.6 hardware reached SSH `CONNECTED` with 41,240 bytes free and a 23,540-
+  byte largest block. Treat every firmware-size or memory allocation change as
+  potentially relevant to SSH reliability.
 
 ## Standard workflow
 
 ```bash
 scripts/test-native.sh
+git diff --check
 pio run -e cardputer-adv
 pio run -e cardputer-adv -t upload
 pio device monitor -e cardputer-adv
 ```
 
-`scripts/embed_ssh_key.py` reads `POCKETDECK_SSH_KEY`, falling back to
-`~/.ssh/id_rsa`. A missing key still builds but disables SSH connections.
-
-Serial log commands: `HELP`, `LOG STATUS`, `LOG DUMP`, `LOG DUMP ALL`, and
-`LOG CLEAR YES`. Do not clear logs while diagnosing an unresolved issue.
+- Use PlatformIO packages under `~/.platformio` and only `cardputer-adv`.
+- Ordinary update: power off, connect USB, then upload. Use G0 download mode
+  only if the serial port is absent or ordinary upload fails.
+- Do not erase flash, clear NVS/BLE bonds, format TF, delete user recordings,
+  or push to GitHub without explicit owner authorization.
+- `scripts/embed_ssh_key.py` reads `POCKETDECK_SSH_KEY`, otherwise
+  `~/.ssh/id_rsa`; missing key builds but disables SSH. Generated key data stays
+  under ignored `.pio/` and must never be staged.
 
 ## Near-term validation
 
-1. Run `localization-smoke-test.md` on v0.9.6 across every app and Quick Settings.
-2. Run `docs/validation/motion-smoke-test.md`; all axis, zero, stationary,
-   shake/latch, exit/isolation, unavailable, and regression rows are pending.
-3. Run `resource-isolation-smoke-test.md`; prioritize MEDIA
-   continuity, no Wi-Fi/BT work during playback, deferred-log flush, and bond/profile survival.
-4. Stay inside SSH or Weather for several minutes and validate direct reconnect,
-   scan backoff, and the new disconnect/LOST_IP reason logs.
-5. Run `docs/validation/lora-text-terminal-smoke-test.md` with antenna attached
-   and a matching second SX1262/RadioLib endpoint; all RF, shared-SPI, and
-   regression rows remain pending until observed.
-6. Run the new GPS 4/4 moving, stationary, invalid, and stale-motion rows
-   outdoors without sharing precise coordinates.
-7. Continue the SSH checklist with two more cold boots, then controls, scrollback, and reconnect.
-8. Recheck BLE, Wi-Fi, weather, GPS, heap, and UI responsiveness after the SSH
-   worker has been created.
-9. Connect a second 2.4 GHz network and confirm both entries appear under Saved
-   networks and saved scan rows show `S`.
-10. Restart near each network separately and confirm automatic connection.
-11. Make both visible and confirm strongest-known selection; then make the first
-   candidate fail and confirm fallback.
-12. Delete one profile and verify the other survives restart.
-13. Recheck BLE typing/range-loss reconnect and confirm Wi-Fi scans occur only
-   inside SSH, Weather, or Settings.
-
-Use the matching files in `docs/validation/` to record results. After the owner
-confirms behavior, update this section, commit locally, and push only if requested.
+1. Run `docs/validation/recorder-smoke-test.md`: all physical rows are pending,
+   including 30-second/multi-minute capture, final WAV/playback, error recovery,
+   exit cleanup, checkpoints, MEDIA/system sounds/logs, LoRa, BLE/Wi-Fi/GPS/IR,
+   and SSH public-key authentication after Recorder use.
+2. Run the MOTION, Sony REMOTE, LoRa, GPS, MEDIA, localization, resource-
+   isolation, and TF-log checklists; retain Pending until actually observed.
+3. Validate SSH direct reconnect, Wi-Fi scan backoff and reconnect over several
+   minutes, then recheck BLE typing/range-loss reconnect and persisted profiles.
+4. After owner confirmation, update only observed checklist rows, commit locally,
+   and push only when explicitly requested.
