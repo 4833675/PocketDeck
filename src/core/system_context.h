@@ -15,6 +15,7 @@ class ImuService;
 class IrService;
 class LoRaService;
 class MediaService;
+class RecorderService;
 class SdLogService;
 class SshHostStore;
 class SshService;
@@ -71,6 +72,7 @@ struct SystemContext {
     IrService* ir = nullptr;
     LoRaService* lora = nullptr;
     MediaService* media = nullptr;
+    RecorderService* recorder = nullptr;
     WifiService* wifi = nullptr;
     WeatherService* weather = nullptr;
     SdLogService* sdLog = nullptr;
