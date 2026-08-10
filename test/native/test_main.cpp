@@ -2372,7 +2372,17 @@ TEST_CASE(recorder_sequential_candidates_are_fixed_and_bounded) {
 
 TEST_CASE(recorder_library_keeps_only_direct_wav_children_and_leaf_names) {
     RecordingLibrary library;
+    struct UnterminatedPath {
+        std::array<char, kRecorderPathCapacity> bytes;
+        char terminator;
+    } unterminated{{}, '\0'};
+    unterminated.bytes.fill('x');
+    std::memcpy(unterminated.bytes.data(), "/Recordings/", 12);
+    std::memcpy(unterminated.bytes.data() + kRecorderPathCapacity - 4, ".WAV", 4);
+
     CHECK(!recorderPathIsWav(nullptr));
+    CHECK(!recorderPathIsWav(unterminated.bytes.data()));
+    CHECK(!library.add(unterminated.bytes.data(), 1));
     CHECK(!recorderPathIsWav("/Recordings/.WAV"));
     CHECK(!recorderPathIsWav("/Recordings/voice.mp3"));
     CHECK(!recorderPathIsWav("/Recordings/sub/voice.WAV"));
@@ -2510,6 +2520,43 @@ TEST_CASE(recorder_app_model_keeps_character_commands_distinct_and_cleans_up_on_
     CHECK_EQ(model.handle({InputAction::Erase, '\0'}, entries).effect, RecorderAppEffect::None);
     CHECK_EQ(model.handle({InputAction::Erase, '\0'}, entries).effect, RecorderAppEffect::GoHome);
     CHECK_EQ(model.exit(), RecorderAppEffect::Cleanup);
+}
+
+TEST_CASE(recorder_app_model_exit_resets_a_stale_delete_confirmation) {
+    RecorderAppModel model;
+    const RecorderAppInputState entries{true, false, false};
+    const RecorderAppInputState idle{};
+
+    model.handle({InputAction::Tab, '\0'}, entries);
+    model.handle({InputAction::None, 'd'}, entries);
+    CHECK_EQ(model.page(), RecorderPage::DeleteConfirm);
+    CHECK_EQ(model.exit(), RecorderAppEffect::Cleanup);
+    CHECK_EQ(model.page(), RecorderPage::Record);
+    CHECK_EQ(model.handle({InputAction::Confirm, '\0'}, idle).effect,
+             RecorderAppEffect::StartRecording);
+}
+
+TEST_CASE(recorder_app_model_rejects_delete_confirmation_while_audio_is_active) {
+    RecorderAppModel model;
+    const RecorderAppInputState entries{true, false, false};
+    const RecorderAppInputState recording{true, true, false};
+    const RecorderAppInputState playing{true, false, true};
+
+    model.handle({InputAction::Tab, '\0'}, entries);
+    CHECK_EQ(model.page(), RecorderPage::Files);
+    model.handle({InputAction::None, 'd'}, playing);
+    CHECK_EQ(model.page(), RecorderPage::Files);
+    model.handle({InputAction::None, 'd'}, recording);
+    CHECK_EQ(model.page(), RecorderPage::Files);
+
+    model.handle({InputAction::None, 'd'}, entries);
+    CHECK_EQ(model.page(), RecorderPage::DeleteConfirm);
+    CHECK_EQ(model.handle({InputAction::Confirm, '\0'}, playing).effect,
+             RecorderAppEffect::None);
+    CHECK_EQ(model.page(), RecorderPage::DeleteConfirm);
+    CHECK_EQ(model.handle({InputAction::Confirm, '\0'}, recording).effect,
+             RecorderAppEffect::None);
+    CHECK_EQ(model.page(), RecorderPage::DeleteConfirm);
 }
 
 TEST_CASE(media_app_maps_library_playback_volume_rescan_and_home) {
@@ -2864,6 +2911,8 @@ int main() {
     recorder_app_model_switches_pages_only_while_audio_is_idle();
     recorder_app_model_emits_record_play_selection_and_delete_effects();
     recorder_app_model_keeps_character_commands_distinct_and_cleans_up_on_exit();
+    recorder_app_model_exit_resets_a_stale_delete_confirmation();
+    recorder_app_model_rejects_delete_confirmation_while_audio_is_active();
     media_app_maps_library_playback_volume_rescan_and_home();
     media_volume_request_is_explicit_and_consumed_once();
     motion_app_navigates_three_pages_and_wraps();

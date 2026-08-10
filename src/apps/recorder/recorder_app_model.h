@@ -38,7 +38,7 @@ struct RecorderAppInputState {
 class RecorderAppModel {
 public:
     RecorderAppResult handle(const InputEvent& event, const RecorderAppInputState& state);
-    RecorderAppEffect exit() const { return RecorderAppEffect::Cleanup; }
+    RecorderAppEffect exit();
     RecorderPage page() const { return page_; }
     InputMode inputMode() const { return InputMode::Text; }
 

@@ -66,6 +66,17 @@ bool formatPath(char* output, std::size_t capacity, std::size_t requiredBytes,
     return written >= 0 && static_cast<std::size_t>(written) + 1 == requiredBytes;
 }
 
+bool boundedCStringLength(const char* input, std::size_t capacity, std::size_t* length) {
+    if (input == nullptr || length == nullptr) return false;
+    for (std::size_t index = 0; index < capacity; ++index) {
+        if (input[index] == '\0') {
+            *length = index;
+            return true;
+        }
+    }
+    return false;
+}
+
 char asciiLower(char value) {
     if (value >= 'A' && value <= 'Z') return static_cast<char>(value - 'A' + 'a');
     return value;
@@ -146,22 +157,20 @@ bool recorderSequentialPath(uint32_t index, char* output, std::size_t capacity) 
 }
 
 bool recorderPathIsWav(const char* path) {
-    if (path == nullptr || std::strncmp(path, kRecordingsDirectory,
-                                        sizeof(kRecordingsDirectory) - 1) != 0) {
+    std::size_t length = 0;
+    if (!boundedCStringLength(path, kRecorderPathCapacity, &length) ||
+        std::strncmp(path, kRecordingsDirectory, sizeof(kRecordingsDirectory) - 1) != 0) {
         return false;
     }
 
-    const char* leaf = path + sizeof(kRecordingsDirectory) - 1;
-    if (*leaf == '\0') return false;
-    for (const char* cursor = leaf; *cursor != '\0'; ++cursor) {
-        if (*cursor == '/') return false;
+    constexpr std::size_t directoryLength = sizeof(kRecordingsDirectory) - 1;
+    if (length <= directoryLength + 4) return false;
+    for (std::size_t index = directoryLength; index < length; ++index) {
+        if (path[index] == '/') return false;
     }
 
-    const std::size_t leafLength = std::strlen(leaf);
-    return leafLength > 4 && leaf[leafLength - 4] == '.' &&
-           asciiLower(leaf[leafLength - 3]) == 'w' &&
-           asciiLower(leaf[leafLength - 2]) == 'a' &&
-           asciiLower(leaf[leafLength - 1]) == 'v';
+    return path[length - 4] == '.' && asciiLower(path[length - 3]) == 'w' &&
+           asciiLower(path[length - 2]) == 'a' && asciiLower(path[length - 1]) == 'v';
 }
 
 const char* recordingEntryName(const RecordingEntry& entry) {
@@ -182,8 +191,8 @@ void RecordingLibrary::clear() {
 bool RecordingLibrary::add(const char* path, uint32_t bytes,
                            RecordingCompatibility compatibility) {
     if (!recorderPathIsWav(path)) return false;
-    const std::size_t length = std::strlen(path);
-    if (length == 0 || length >= kRecorderPathCapacity) return false;
+    std::size_t length = 0;
+    if (!boundedCStringLength(path, kRecorderPathCapacity, &length)) return false;
 
     RecordingEntry candidate;
     std::memcpy(candidate.path.data(), path, length + 1);

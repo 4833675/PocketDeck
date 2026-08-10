@@ -2,12 +2,18 @@
 
 namespace pd {
 
+RecorderAppEffect RecorderAppModel::exit() {
+    page_ = RecorderPage::Record;
+    return RecorderAppEffect::Cleanup;
+}
+
 RecorderAppResult RecorderAppModel::handle(const InputEvent& event,
                                            const RecorderAppInputState& state) {
     if (page_ == RecorderPage::DeleteConfirm) {
         if (event.action == InputAction::Erase) {
             page_ = RecorderPage::Files;
-        } else if (event.action == InputAction::Confirm && state.hasEntries) {
+        } else if (event.action == InputAction::Confirm && state.hasEntries && !state.recording &&
+                   !state.playing) {
             page_ = RecorderPage::Files;
             return {RecorderAppEffect::DeleteSelected};
         }
@@ -42,7 +48,8 @@ RecorderAppResult RecorderAppModel::handle(const InputEvent& event,
         return {state.playing ? RecorderAppEffect::StopPlayback
                               : RecorderAppEffect::StartPlayback};
     }
-    if (event.action == InputAction::None && event.character == 'd' && state.hasEntries) {
+    if (event.action == InputAction::None && event.character == 'd' && state.hasEntries &&
+        !state.recording && !state.playing) {
         page_ = RecorderPage::DeleteConfirm;
     }
     return {};
