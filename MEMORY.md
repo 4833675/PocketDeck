@@ -10,10 +10,11 @@ guide; `docs/validation/` holds reusable hardware checklists.
 - Repository: `https://github.com/4833675/PocketDeck`; public version remains
   `0.9.6` until the user explicitly requests a GitHub sync.
 - RECORDER runtime integration is commit `d12f8fd`, with review fixes in
-  `50aa619`; documentation is in `518cb22` and `6485819`.
-- Automated final-integrated evidence: `scripts/test-native.sh` passed 1,601
+  `50aa619` and deferred-log hardening in `7799301`; documentation is in
+  `518cb22` and `6485819`.
+- Automated final-integrated evidence: `scripts/test-native.sh` passed 1,855
   checks; `git diff --check` passed; `pio run -e cardputer-adv` passed with RAM
-  `104728 / 327680` bytes (32.0%) and flash `2134157 / 3145728` bytes (67.8%).
+  `104824 / 327680` bytes (32.0%) and flash `2135813 / 3145728` bytes (67.9%).
   This is source/build evidence only, not physical hardware proof.
 - Physical Recorder checks are all pending. Do not infer microphone capture,
   WAV finalization, speaker/AUX playback, recovery, resource isolation, or
@@ -98,7 +99,9 @@ guide; `docs/validation/` holds reusable hardware checklists.
   loss can lose the final in-flight buffer but should leave the latest checkpoint
   length usable.
 - Recorder diagnostics are categorical lifecycle/error events plus aggregate
-  byte/duration totals. Never log filenames, directory listings, audio samples,
+  byte/duration totals. During realtime audio, only exact whitelisted Recorder
+  scan/state/exit fields enter the fixed deferred queue; failed writes retain
+  queue order for retry. Never log filenames, directory listings, audio samples,
   waveform/level values, recorded content, typed text, passwords, passkeys,
   precise coordinates, or LoRa payloads.
 - Upstream limitations: Arduino `File::flush()` has no result, M5Unified hides
