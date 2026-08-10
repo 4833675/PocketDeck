@@ -59,7 +59,7 @@ void drawHint(M5Canvas& canvas, MotionPage page, UiLanguage language) {
             break;
         case MotionPage::Activity:
             hint = localized(language, "ENTER RESET TAB/FN<> BKSP/G0 HOME",
-                             "ENTER 重置峰值 TAB/FN<> BKSP/G0 返回");
+                             "ENTER清峰 TAB/FN翻页 BKSP/G0返回");
             break;
     }
     canvas.drawString(hint, config::kScreenWidth / 2,
