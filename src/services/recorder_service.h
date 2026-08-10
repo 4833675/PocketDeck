@@ -98,9 +98,13 @@ private:
     static constexpr uint32_t kMicDrainTimeoutMs = 1000;
     static constexpr uint32_t kMicDiscardTimeoutMs = 400;
     static constexpr uint32_t kSpeakerWakeTimeoutMs = 300;
+    static constexpr uint32_t kPlaybackCompletionMarginMs = 8;
     static constexpr uint8_t kPlaybackChannel = 7;
+    static constexpr uint8_t kInvalidBufferIndex = 0xFF;
     static constexpr std::size_t kCaptureSamples = 1024;
     static constexpr std::size_t kPlaybackSamples = 1024;
+    static constexpr std::size_t kShortPlaybackFallbackSamples = 256;
+    static constexpr int16_t kCaptureSentinel = 0x5A5A;
 
     bool scanStorage(bool storageMounted, bool updateIdleState);
     bool ensureRecordingsDirectory();
@@ -118,6 +122,7 @@ private:
     void discardCaptureBounded();
     void resetCaptureQueue();
     int16_t* captureData(uint8_t bufferIndex);
+    bool captureBufferUntouched(uint8_t bufferIndex) const;
     void updateWaveform(const int16_t* samples);
     bool finishRecording(bool storageMounted, uint32_t nowMs,
                          uint8_t persistedVolumePercent, bool drainNormally,
@@ -125,10 +130,10 @@ private:
     bool finalizeRecordingFile();
 
     bool updatePlayback(uint32_t nowMs);
-    bool queueNextPlaybackChunk(uint32_t nowMs);
-    bool primePlayback(uint32_t nowMs);
+    bool queueNextPlaybackChunk();
+    bool primePlayback();
     bool queuePlaybackBuffer(uint8_t bufferIndex, std::size_t sampleCount,
-                             std::size_t hardwareDepthBefore, uint32_t nowMs);
+                             std::size_t hardwareDepthBefore);
     int16_t* playbackData(uint8_t bufferIndex);
     int findFreePlaybackBuffer() const;
     void releaseConsumedPlaybackBuffers(std::size_t hardwareDepth);
@@ -170,6 +175,7 @@ private:
     uint8_t captureObservedDepth_ = 0;
     CapturePhase capturePhase_ = CapturePhase::Idle;
     uint32_t captureWakeDeadlineMs_ = 0;
+    uint8_t captureWakingBuffer_ = kInvalidBufferIndex;
 
     std::array<int8_t, kRecorderWaveformColumns> waveform_{};
     uint8_t levelPercent_ = 0;
@@ -186,6 +192,9 @@ private:
     uint8_t playbackQueued_ = 0;
     PlaybackPhase playbackPhase_ = PlaybackPhase::Idle;
     uint32_t playbackWakeDeadlineMs_ = 0;
+    uint32_t playbackWakingStartedMs_ = 0;
+    uint16_t playbackWakingSamples_ = 0;
+    uint8_t playbackWakingBuffer_ = kInvalidBufferIndex;
 };
 
 }  // namespace pd

@@ -156,17 +156,18 @@ bool RecorderService::startRecording(bool storageMounted, int64_t utcEpochSecond
     if (state_ == RecorderState::Recording || recordingFile_) return false;
     persistedVolumePercent_ = persistedVolumePercent;
     activeStorageMounted_ = storageMounted;
-    if (!storageMounted) {
-        state_ = RecorderState::NoCard;
-        error_ = RecorderError::NoCard;
-        return false;
-    }
 
     if (state_ == RecorderState::Playing || playbackFile_) {
         if (!stopPlaybackInternal(persistedVolumePercent_, false)) {
             setError(RecorderError::SpeakerStartFailed);
             return false;
         }
+    }
+    if (!storageMounted) {
+        state_ = RecorderState::NoCard;
+        error_ = RecorderError::NoCard;
+        freeBytes_ = 0;
+        return false;
     }
 
     stopSpeakerForCapture();
@@ -225,7 +226,8 @@ bool RecorderService::startRecording(bool storageMounted, int64_t utcEpochSecond
     }
     recordingFreeBudget_ -= headerWritten;
     // Make the zero-length canonical header durable before Mic owns any caller
-    // buffer. Later 64,000-byte checkpoints advance this crash-safe boundary.
+    // buffer. The pinned File::flush() returns void and cannot report its
+    // fflush/fsync result; this is the strongest public durability request.
     recordingFile_.flush();
 
     pcmBytes_ = 0;
@@ -277,6 +279,7 @@ bool RecorderService::primeCapture(uint32_t nowMs) {
     capturePhase_ = CapturePhase::Waking;
     captureObservedDepth_ = 0;
     captureWakeDeadlineMs_ = nowMs + kMicWakeTimeoutMs;
+    captureWakingBuffer_ = 0;
     return true;
 }
 
@@ -287,11 +290,13 @@ bool RecorderService::queueCapture(uint8_t bufferIndex) {
         return false;
     }
 
+    int16_t* buffer = captureData(bufferIndex);
+    std::fill_n(buffer, kCaptureSamples, kCaptureSentinel);
+
     // Invariant: record() is called only when our FIFO proves one of
     // M5Unified's two internal descriptors is free. The array is not written or
     // reused again until a later observed depth decrease releases this FIFO row.
-    if (!M5Cardputer.Mic.record(captureData(bufferIndex), kCaptureSamples,
-                               kSampleRate, false)) {
+    if (!M5Cardputer.Mic.record(buffer, kCaptureSamples, kSampleRate, false)) {
         return false;
     }
     const uint8_t tail = static_cast<uint8_t>((captureFifoHead_ + captureQueued_) % 2);
@@ -316,13 +321,30 @@ bool RecorderService::processCapture(uint32_t nowMs, bool allowRequeue) {
 
     if (capturePhase_ == CapturePhase::Waking) {
         if (hardwareDepth == 0) {
-            if (deadlineReached(nowMs, captureWakeDeadlineMs_)) {
-                setError(RecorderError::MicWakeTimeout);
-                return false;
+            if (!deadlineReached(nowMs, captureWakeDeadlineMs_)) return true;
+
+            // isRecording() can miss a complete 64 ms block. At depth zero it
+            // is safe to inspect the sentinel, but never while Mic reports an
+            // owned descriptor. Any changed sample proves this block completed.
+            if (captureWakingBuffer_ < captureQueuedFlags_.size() &&
+                captureQueuedFlags_[captureWakingBuffer_] &&
+                !captureBufferUntouched(captureWakingBuffer_)) {
+                if (!releaseCompletedCapture(0)) return false;
+                captureObservedDepth_ = 0;
+                captureWakingBuffer_ = kInvalidBufferIndex;
+                if (!allowRequeue) {
+                    capturePhase_ = CapturePhase::Idle;
+                    return true;
+                }
+                if (!primeCapture(nowMs)) {
+                    setError(RecorderError::MicQueueFailed);
+                    return false;
+                }
+                return true;
             }
-            // Immediate zero is the documented _is_recording wake race, not a
-            // completed block. No SD access or second record() is allowed yet.
-            return true;
+
+            setError(RecorderError::MicWakeTimeout);
+            return false;
         }
 
         // A nonzero depth proves the Mic task woke. Reconcile any completed
@@ -330,6 +352,7 @@ bool RecorderService::processCapture(uint32_t nowMs, bool allowRequeue) {
         if (!releaseCompletedCapture(hardwareDepth)) return false;
         capturePhase_ = CapturePhase::Active;
         captureObservedDepth_ = captureQueued_;
+        captureWakingBuffer_ = kInvalidBufferIndex;
         if (!allowRequeue) return true;
         return refillCapture(nowMs);
     }
@@ -415,6 +438,7 @@ bool RecorderService::refillCapture(uint32_t nowMs) {
         // lets processCapture reconcile FIFO ownership safely.
         capturePhase_ = CapturePhase::Waking;
         captureWakeDeadlineMs_ = nowMs + kMicWakeTimeoutMs;
+        captureWakingBuffer_ = freeBuffer;
     }
     return true;
 }
@@ -530,21 +554,21 @@ bool RecorderService::finishRecording(bool storageMounted, uint32_t nowMs,
         discardCaptureBounded();
     }
 
-    std::array<char, kRecorderPathCapacity> emptyFailedPath{};
-    const bool removeEmptyFailedStart =
-        pcmBytes_ == 0 && recordingPath_[0] != '\0' &&
-        (outcome == RecorderError::MicQueueFailed ||
-         outcome == RecorderError::MicWakeTimeout);
-    if (removeEmptyFailedStart) emptyFailedPath = recordingPath_;
+    std::array<char, kRecorderPathCapacity> emptyErrorPath{};
+    if (pcmBytes_ == 0 && recordingPath_[0] != '\0') {
+        emptyErrorPath = recordingPath_;
+    }
 
     M5Cardputer.Mic.end();
     const bool finalized = finalizeRecordingFile();
-    if (removeEmptyFailedStart) {
-        // No PCM was ever declared and the path is still provably the unique
-        // file created by this start attempt. Do not leave an empty recording.
-        SD.remove(emptyFailedPath.data());
-    }
     if (!finalized && outcome == RecorderError::None) outcome = RecorderError::FinalizeFailed;
+    if (outcome != RecorderError::None && pcmBytes_ == 0 &&
+        emptyErrorPath[0] != '\0') {
+        // The path was unique when opened and is still the file created by this
+        // attempt. Remove zero-PCM files for recording errors, but retain a
+        // valid empty WAV produced by a normal user stop.
+        SD.remove(emptyErrorPath.data());
+    }
     completedPcmBytes_ = pcmBytes_;
     completedDurationMs_ = static_cast<uint32_t>(
         (static_cast<uint64_t>(completedPcmBytes_) * 1000u) / kPcmBytesPerSecond);
@@ -592,10 +616,19 @@ void RecorderService::resetCaptureQueue() {
     captureObservedDepth_ = 0;
     capturePhase_ = CapturePhase::Idle;
     captureWakeDeadlineMs_ = 0;
+    captureWakingBuffer_ = kInvalidBufferIndex;
 }
 
 int16_t* RecorderService::captureData(uint8_t bufferIndex) {
     return bufferIndex == 0 ? captureBufferA_.data() : captureBufferB_.data();
+}
+
+bool RecorderService::captureBufferUntouched(uint8_t bufferIndex) const {
+    if (bufferIndex >= captureQueuedFlags_.size()) return true;
+    const auto& buffer = bufferIndex == 0 ? captureBufferA_ : captureBufferB_;
+    return std::all_of(buffer.begin(), buffer.end(), [](int16_t sample) {
+        return sample == kCaptureSentinel;
+    });
 }
 
 void RecorderService::updateWaveform(const int16_t* samples) {
@@ -715,7 +748,7 @@ bool RecorderService::updatePlayback(uint32_t nowMs) {
             finishPlaybackNaturally();
             return true;
         }
-        if (!primePlayback(nowMs)) {
+        if (!primePlayback()) {
             const RecorderError terminal = error_;
             stopPlaybackInternal(persistedVolumePercent_, true);
             setError(terminal);
@@ -726,15 +759,47 @@ bool RecorderService::updatePlayback(uint32_t nowMs) {
 
     if (playbackPhase_ == PlaybackPhase::Waking) {
         if (hardwareDepth == 0) {
-            if (!deadlineReached(nowMs, playbackWakeDeadlineMs_)) return true;
-            stopPlaybackInternal(persistedVolumePercent_, true);
-            setError(RecorderError::SpeakerWakeTimeout);
-            return false;
+            const bool trackedShortChunk =
+                playbackWakingBuffer_ < playbackQueuedFlags_.size() &&
+                playbackQueuedFlags_[playbackWakingBuffer_] &&
+                playbackWakingSamples_ > 0 &&
+                playbackWakingSamples_ <= kShortPlaybackFallbackSamples;
+            const uint32_t chunkDurationMs = static_cast<uint32_t>(
+                (static_cast<uint64_t>(playbackWakingSamples_) * 1000u +
+                 kSampleRate - 1u) /
+                kSampleRate);
+            const bool shortChunkElapsed =
+                trackedShortChunk && M5Cardputer.Speaker.isRunning() &&
+                nowMs - playbackWakingStartedMs_ >=
+                    chunkDurationMs + kPlaybackCompletionMarginMs;
+
+            if (shortChunkElapsed) {
+                // A genuinely short chunk can complete before update observes
+                // nonzero depth. Keep every FIFO pointer immutable through its
+                // full duration plus margin, then depth zero proves it is safe
+                // to release. Full chunks never use this fallback.
+                releaseConsumedPlaybackBuffers(0);
+                playbackPhase_ = PlaybackPhase::Active;
+                playbackWakeDeadlineMs_ = 0;
+                playbackWakingStartedMs_ = 0;
+                playbackWakingSamples_ = 0;
+                playbackWakingBuffer_ = kInvalidBufferIndex;
+            } else {
+                if (!deadlineReached(nowMs, playbackWakeDeadlineMs_)) return true;
+                stopPlaybackInternal(persistedVolumePercent_, true);
+                setError(RecorderError::SpeakerWakeTimeout);
+                return false;
+            }
+        } else {
+            // A nonzero channel depth proves actual Speaker worker activity.
+            // begin()/isRunning() alone cannot prove xTaskCreate succeeded.
+            releaseConsumedPlaybackBuffers(hardwareDepth);
+            playbackPhase_ = PlaybackPhase::Active;
+            playbackWakeDeadlineMs_ = 0;
+            playbackWakingStartedMs_ = 0;
+            playbackWakingSamples_ = 0;
+            playbackWakingBuffer_ = kInvalidBufferIndex;
         }
-        // As with Mic startup, do not release or refill the first pointer until
-        // a nonzero channel depth proves the Speaker task accepted ownership.
-        releaseConsumedPlaybackBuffers(hardwareDepth);
-        playbackPhase_ = PlaybackPhase::Active;
     } else {
         releaseConsumedPlaybackBuffers(hardwareDepth);
         if (hardwareDepth == 0 && playbackQueued_ == 0) {
@@ -744,7 +809,7 @@ bool RecorderService::updatePlayback(uint32_t nowMs) {
             }
             // A fully drained channel is re-primed with exactly one pointer and
             // must pass the bounded Waking handshake again before queue growth.
-            if (!primePlayback(nowMs)) {
+            if (!primePlayback()) {
                 const RecorderError terminal = error_;
                 stopPlaybackInternal(persistedVolumePercent_, true);
                 setError(terminal);
@@ -756,7 +821,7 @@ bool RecorderService::updatePlayback(uint32_t nowMs) {
 
     while (playbackPhase_ == PlaybackPhase::Active && playbackQueued_ < 2 &&
            playbackRemainingBytes_ > 0) {
-        if (!queueNextPlaybackChunk(nowMs)) {
+        if (!queueNextPlaybackChunk()) {
             const RecorderError terminal = error_;
             stopPlaybackInternal(persistedVolumePercent_, true);
             setError(terminal);
@@ -770,18 +835,16 @@ bool RecorderService::updatePlayback(uint32_t nowMs) {
     return true;
 }
 
-bool RecorderService::primePlayback(uint32_t nowMs) {
+bool RecorderService::primePlayback() {
     if (playbackQueued_ != 0 || playbackRemainingBytes_ == 0 ||
-        !queueNextPlaybackChunk(nowMs)) {
+        !queueNextPlaybackChunk()) {
         if (error_ == RecorderError::None) setError(RecorderError::SpeakerQueueFailed);
         return false;
     }
-    playbackPhase_ = PlaybackPhase::Waking;
-    playbackWakeDeadlineMs_ = nowMs + kSpeakerWakeTimeoutMs;
-    return true;
+    return playbackPhase_ == PlaybackPhase::Waking;
 }
 
-bool RecorderService::queueNextPlaybackChunk(uint32_t nowMs) {
+bool RecorderService::queueNextPlaybackChunk() {
     if (playbackPhase_ == PlaybackPhase::Waking) {
         setError(RecorderError::SpeakerQueueFailed);
         return false;
@@ -825,7 +888,7 @@ bool RecorderService::queueNextPlaybackChunk(uint32_t nowMs) {
     }
     releaseConsumedPlaybackBuffers(hardwareDepth);
     if (!queuePlaybackBuffer(static_cast<uint8_t>(freeBuffer), read / 2,
-                             hardwareDepth, nowMs)) {
+                             hardwareDepth)) {
         setError(RecorderError::SpeakerQueueFailed);
         return false;
     }
@@ -835,8 +898,7 @@ bool RecorderService::queueNextPlaybackChunk(uint32_t nowMs) {
 
 bool RecorderService::queuePlaybackBuffer(uint8_t bufferIndex,
                                           std::size_t sampleCount,
-                                          std::size_t hardwareDepthBefore,
-                                          uint32_t nowMs) {
+                                          std::size_t hardwareDepthBefore) {
     if (bufferIndex >= playbackQueuedFlags_.size() || sampleCount == 0 ||
         playbackQueuedFlags_[bufferIndex] || playbackQueued_ >= 2 ||
         hardwareDepthBefore > playbackQueued_ || hardwareDepthBefore >= 2 ||
@@ -852,6 +914,7 @@ bool RecorderService::queuePlaybackBuffer(uint8_t bufferIndex,
         playbackData(bufferIndex), sampleCount, kSampleRate, false, 1,
         kPlaybackChannel, false);
     if (!accepted || !M5Cardputer.Speaker.isRunning()) return false;
+    const uint32_t queuedAtMs = millis();
 
     const uint8_t tail = static_cast<uint8_t>((playbackFifoHead_ + playbackQueued_) % 2);
     playbackFifo_[tail] = bufferIndex;
@@ -864,7 +927,10 @@ bool RecorderService::queuePlaybackBuffer(uint8_t bufferIndex,
         // window as initial playback. Protect the newly queued pointer until a
         // later nonzero observation, even if stale FIFO rows precede it.
         playbackPhase_ = PlaybackPhase::Waking;
-        playbackWakeDeadlineMs_ = nowMs + kSpeakerWakeTimeoutMs;
+        playbackWakeDeadlineMs_ = queuedAtMs + kSpeakerWakeTimeoutMs;
+        playbackWakingStartedMs_ = queuedAtMs;
+        playbackWakingSamples_ = static_cast<uint16_t>(sampleCount);
+        playbackWakingBuffer_ = bufferIndex;
     }
     return true;
 }
@@ -936,6 +1002,9 @@ void RecorderService::resetPlaybackQueue() {
     playbackQueued_ = 0;
     playbackPhase_ = PlaybackPhase::Idle;
     playbackWakeDeadlineMs_ = 0;
+    playbackWakingStartedMs_ = 0;
+    playbackWakingSamples_ = 0;
+    playbackWakingBuffer_ = kInvalidBufferIndex;
 }
 
 void RecorderService::setSelectedCompatibility(
@@ -1027,6 +1096,8 @@ void RecorderService::stopSpeakerForCapture() {
 
 bool RecorderService::restoreSpeaker(uint8_t persistedVolumePercent) {
     const bool begun = M5Cardputer.Speaker.begin();
+    // Pinned begin()/isRunning() cannot expose xTaskCreate success. Playback's
+    // bounded Waking phase supplies the practical channel-activity proof.
     if (!begun || !M5Cardputer.Speaker.isRunning()) return false;
     M5Cardputer.Speaker.setVolume(rawVolume(persistedVolumePercent));
     return true;
