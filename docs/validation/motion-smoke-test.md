@@ -38,7 +38,7 @@ These results validate the current source, not physical hardware behavior.
 | ID | Command | Expected | Result | Evidence |
 |---|---|---|---|---|
 | MOTION-BUILD-01 | `scripts/test-native.sh` | Native checks pass | Passed | `PASS: 1855 checks` |
-| MOTION-BUILD-02 | `pio run -e cardputer-adv` | Target builds | Passed | RAM `104824` bytes; flash `2135813` bytes |
+| MOTION-BUILD-02 | `pio run -e cardputer-adv` | Target builds | Passed | RAM `104824` bytes; flash `2133097` bytes |
 
 ## Physical Cardputer Adv checks
 

@@ -48,7 +48,7 @@ transmitted IR or that the TV received it.
 | ID | Command | Expected | Result | Evidence |
 |---|---|---|---|---|
 | SONY-BUILD-01 | `scripts/test-native.sh` | Native checks pass | Passed | `PASS: 1855 checks`; source only. |
-| SONY-BUILD-02 | `pio run -e cardputer-adv` | Cardputer Adv target builds | Passed | RAM `104824` bytes; flash `2135813` bytes; source only. |
+| SONY-BUILD-02 | `pio run -e cardputer-adv` | Cardputer Adv target builds | Passed | RAM `104824` bytes; flash `2133097` bytes; source only. |
 
 Run `git diff --check` as an authoring check before handoff. It is not an
 automated evidence row and does not establish a hardware result.

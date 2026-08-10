@@ -14,7 +14,7 @@ guide; `docs/validation/` holds reusable hardware checklists.
   `518cb22` and `6485819`.
 - Automated final-integrated evidence: `scripts/test-native.sh` passed 1,855
   checks; `git diff --check` passed; `pio run -e cardputer-adv` passed with RAM
-  `104824 / 327680` bytes (32.0%) and flash `2135813 / 3145728` bytes (67.9%).
+  `104824 / 327680` bytes (32.0%) and flash `2133097 / 3145728` bytes (67.8%).
   This is source/build evidence only, not physical hardware proof.
 - Physical Recorder checks are all pending. Do not infer microphone capture,
   WAV finalization, speaker/AUX playback, recovery, resource isolation, or

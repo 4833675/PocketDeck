@@ -19,7 +19,7 @@ physical recording or playback.
 |---|---|---|---|---|
 | REC-BUILD-01 | `scripts/test-native.sh` | Native checks pass | Passed | `PASS: 1855 checks`; source only. |
 | REC-BUILD-02 | `git diff --check` | No whitespace errors | Passed | Final documentation/source tree; source only. |
-| REC-BUILD-03 | `pio run -e cardputer-adv` | Cardputer Adv target builds | Passed | RAM `104824 / 327680` bytes (32.0%); flash `2135813 / 3145728` bytes (67.9%); source only. |
+| REC-BUILD-03 | `pio run -e cardputer-adv` | Cardputer Adv target builds | Passed | RAM `104824 / 327680` bytes (32.0%); flash `2133097 / 3145728` bytes (67.8%); source only. |
 
 ## Physical Cardputer Adv checks
 
