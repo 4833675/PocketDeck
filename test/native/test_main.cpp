@@ -26,6 +26,7 @@
 #include "apps/ssh/ssh_app_text.h"
 #include "core/ble_keyboard_policy.h"
 #include "core/clock_data.h"
+#include "core/deferred_log_data.h"
 #include "core/g0_gesture.h"
 #include "core/gps_data.h"
 #include "core/lora_data.h"
@@ -708,6 +709,145 @@ TEST_CASE(recorder_restoration_volume_always_uses_the_latest_system_setting) {
     CHECK_EQ(volume.percent(), 25u);
     volume.set(80);
     CHECK_EQ(volume.percent(), 80u);
+}
+
+TEST_CASE(deferred_recorder_events_parse_and_rebuild_canonical_diagnostics) {
+    struct Case {
+        const char* input;
+        DeferredLogEventKind kind;
+    };
+    constexpr std::array<Case, 3> cases{{
+        {"RECORDER scan: mounted=1 ok=0 entries=64 truncated=1",
+         DeferredLogEventKind::RecorderScan},
+        {"RECORDER state: recording error=none", DeferredLogEventKind::RecorderState},
+        {"RECORDER exit: bytes=4294967295 duration_ms=123456",
+         DeferredLogEventKind::RecorderExit},
+    }};
+
+    for (const Case& test : cases) {
+        DeferredLogEvent event{};
+        CHECK(parseDeferredRecorderEvent(test.input, event));
+        CHECK_EQ(event.kind, test.kind);
+        std::array<char, 96> canonical{};
+        CHECK(formatDeferredRecorderEvent(event, canonical.data(), canonical.size()));
+        CHECK_STR_EQ(canonical.data(), test.input);
+    }
+}
+
+TEST_CASE(deferred_recorder_state_and_error_tokens_match_every_recorder_diagnostic) {
+    constexpr std::array<const char*, 8> states{{
+        "no-card", "empty", "ready", "recording", "playing", "unsupported", "malformed", "error",
+    }};
+    constexpr std::array<const char*, 23> errors{{
+        "none", "no-card", "directory-create", "directory-open", "file-open",
+        "no-filename", "placeholder-write", "storage-full", "mic-start", "mic-wake-timeout",
+        "mic-queue", "mic-drain-timeout", "pcm-write", "checkpoint", "finalize",
+        "playback-open", "playback-read", "speaker-start", "speaker-wake-timeout",
+        "speaker-queue", "unsupported-wav", "malformed-wav", "delete",
+    }};
+
+    std::array<char, 96> input{};
+    std::array<char, 96> canonical{};
+    for (const char* state : states) {
+        const int written = std::snprintf(input.data(), input.size(),
+                                          "RECORDER state: %s error=none", state);
+        CHECK(written > 0 && static_cast<std::size_t>(written) < input.size());
+        DeferredLogEvent event{};
+        CHECK(parseDeferredRecorderEvent(input.data(), event));
+        CHECK_EQ(event.kind, DeferredLogEventKind::RecorderState);
+        CHECK(formatDeferredRecorderEvent(event, canonical.data(), canonical.size()));
+        CHECK_STR_EQ(canonical.data(), input.data());
+    }
+    for (const char* error : errors) {
+        const int written = std::snprintf(input.data(), input.size(),
+                                          "RECORDER state: error error=%s", error);
+        CHECK(written > 0 && static_cast<std::size_t>(written) < input.size());
+        DeferredLogEvent event{};
+        CHECK(parseDeferredRecorderEvent(input.data(), event));
+        CHECK_EQ(event.kind, DeferredLogEventKind::RecorderState);
+        CHECK(formatDeferredRecorderEvent(event, canonical.data(), canonical.size()));
+        CHECK_STR_EQ(canonical.data(), input.data());
+    }
+}
+
+TEST_CASE(deferred_recorder_events_reject_malformed_and_untrusted_messages) {
+    constexpr std::array<const char*, 9> malformed{{
+        nullptr,
+        "RECORDER scan: mounted=1 ok=1 entries=1 truncated=0 file=/Recordings/private.wav",
+        "RECORDER scan: mounted=2 ok=1 entries=1 truncated=0",
+        "RECORDER scan: mounted=1 ok=1 entries=256 truncated=0",
+        "RECORDER state: ready error=none waveform=99",
+        "RECORDER state: READY error=none",
+        "RECORDER state: ready error=unknown",
+        "RECORDER exit: bytes=12 duration_ms=34 /Recordings/private.wav",
+        "RECORDER exit: bytes=4294967296 duration_ms=1",
+    }};
+    for (const char* message : malformed) {
+        DeferredLogEvent event{};
+        CHECK(!parseDeferredRecorderEvent(message, event));
+    }
+}
+
+TEST_CASE(deferred_log_queue_keeps_twelve_recorder_events_in_fifo_order) {
+    DeferredLogQueue queue;
+    constexpr std::array<const char*, 3> firstMessages{{
+        "RECORDER scan: mounted=1 ok=1 entries=2 truncated=0",
+        "RECORDER state: ready error=none",
+        "RECORDER exit: bytes=3 duration_ms=4",
+    }};
+    for (std::size_t index = 0; index < firstMessages.size(); ++index) {
+        DeferredLogEvent event{};
+        CHECK(parseDeferredRecorderEvent(firstMessages[index], event));
+        event.epochSeconds = static_cast<int64_t>(100 + index);
+        event.uptimeMs = static_cast<uint32_t>(200 + index);
+        CHECK(queue.push(event));
+    }
+    for (std::size_t index = firstMessages.size(); index < kDeferredLogQueueCapacity; ++index) {
+        std::array<char, 80> message{};
+        const int written = std::snprintf(message.data(), message.size(),
+                                          "RECORDER exit: bytes=%u duration_ms=%u",
+                                          static_cast<unsigned>(index),
+                                          static_cast<unsigned>(index + 100));
+        CHECK(written > 0 && static_cast<std::size_t>(written) < message.size());
+        DeferredLogEvent event{};
+        CHECK(parseDeferredRecorderEvent(message.data(), event));
+        CHECK(queue.push(event));
+    }
+    CHECK_EQ(queue.size(), kDeferredLogQueueCapacity);
+    DeferredLogEvent retained{};
+    CHECK(queue.peek(retained));
+    CHECK_EQ(retained.kind, DeferredLogEventKind::RecorderScan);
+    CHECK_EQ(queue.size(), kDeferredLogQueueCapacity);
+    DeferredLogEvent overflow{};
+    CHECK(parseDeferredRecorderEvent("RECORDER exit: bytes=99 duration_ms=99", overflow));
+    CHECK(!queue.push(overflow));
+
+    for (const char* expected : firstMessages) {
+        DeferredLogEvent event{};
+        CHECK(queue.pop(event));
+        std::array<char, 96> canonical{};
+        CHECK(formatDeferredRecorderEvent(event, canonical.data(), canonical.size()));
+        CHECK_STR_EQ(canonical.data(), expected);
+    }
+    for (std::size_t index = firstMessages.size(); index < kDeferredLogQueueCapacity; ++index) {
+        DeferredLogEvent event{};
+        CHECK(queue.pop(event));
+        std::array<char, 96> canonical{};
+        std::array<char, 96> expected{};
+        CHECK(formatDeferredRecorderEvent(event, canonical.data(), canonical.size()));
+        std::snprintf(expected.data(), expected.size(),
+                      "RECORDER exit: bytes=%u duration_ms=%u",
+                      static_cast<unsigned>(index), static_cast<unsigned>(index + 100));
+        CHECK_STR_EQ(canonical.data(), expected.data());
+    }
+    CHECK(queue.empty());
+    DeferredLogEvent ignored{};
+    CHECK(!queue.pop(ignored));
+}
+
+TEST_CASE(realtime_audio_log_status_is_generic) {
+    CHECK_STR_EQ(kRealtimeAudioDeferredLogStatus,
+                 "TF log access is deferred during realtime audio");
 }
 
 TEST_CASE(wifi_and_weather_labels_cover_visible_states) {
@@ -3039,6 +3179,11 @@ int main() {
     recorder_app_model_keeps_character_commands_distinct_and_cleans_up_on_exit();
     recorder_app_model_exit_resets_a_stale_delete_confirmation();
     recorder_app_model_rejects_delete_confirmation_while_audio_is_active();
+    deferred_recorder_events_parse_and_rebuild_canonical_diagnostics();
+    deferred_recorder_state_and_error_tokens_match_every_recorder_diagnostic();
+    deferred_recorder_events_reject_malformed_and_untrusted_messages();
+    deferred_log_queue_keeps_twelve_recorder_events_in_fifo_order();
+    realtime_audio_log_status_is_generic();
     media_app_maps_library_playback_volume_rescan_and_home();
     media_volume_request_is_explicit_and_consumed_once();
     motion_app_navigates_three_pages_and_wraps();

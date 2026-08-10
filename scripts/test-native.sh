@@ -32,7 +32,7 @@ mkdir -p .build
 
 sources=(test/native/test_main.cpp src/core/mac_keymap.cpp src/core/text_keymap.cpp \
          src/core/ir_data.cpp src/core/lora_data.cpp src/core/lora_tx_policy.cpp src/core/media_data.cpp \
-         src/core/recorder_data.cpp \
+         src/core/recorder_data.cpp src/core/deferred_log_data.cpp \
          src/core/motion_data.cpp)
 for source in src/core/input_router.cpp src/core/g0_gesture.cpp src/core/system_settings.cpp \
               src/core/ble_keyboard_policy.cpp src/core/clock_data.cpp src/core/gps_data.cpp \

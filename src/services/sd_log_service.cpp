@@ -121,7 +121,7 @@ bool SdLogService::formatCard() {
 void SdLogService::setDeferred(bool deferred) {
     if (deferred_ == deferred) {
         if (!deferred && !flushingDeferred_ &&
-            (deferredCount_ > 0 || deferredDropped_ > 0)) {
+            (!deferredEvents_.empty() || deferredDropped_ > 0)) {
             flushDeferred();
         }
         return;
@@ -156,7 +156,7 @@ bool SdLogService::append(const char* message) {
         return enqueueDeferred(message);
     }
     if (!ready_ || snapshot_.state != SdLogState::Ready) return false;
-    if ((deferredCount_ > 0 || deferredDropped_ > 0) && !flushDeferred()) return false;
+    if ((!deferredEvents_.empty() || deferredDropped_ > 0) && !flushDeferred()) return false;
 
     return appendNow(message, static_cast<int64_t>(std::time(nullptr)), millis());
 }
@@ -189,14 +189,14 @@ bool SdLogService::appendNow(const char* message, int64_t epochSeconds, uint32_t
 
 bool SdLogService::dumpLogs(Print& output, bool includePrevious) {
     if (deferred_ || flushingDeferred_) {
-        output.println("[console] TF log access is deferred during MEDIA playback");
+        output.printf("[console] %s\n", kRealtimeAudioDeferredLogStatus);
         return false;
     }
     if (!ready_ || snapshot_.state != SdLogState::Ready) {
         output.println("[console] TF logging is not ready");
         return false;
     }
-    if ((deferredCount_ > 0 || deferredDropped_ > 0) && !flushDeferred()) {
+    if ((!deferredEvents_.empty() || deferredDropped_ > 0) && !flushDeferred()) {
         output.println("[console] Could not flush deferred TF logs");
         return false;
     }
@@ -384,25 +384,22 @@ bool SdLogService::rotateIfNeeded() {
 }
 
 bool SdLogService::enqueueDeferred(const char* message) {
-    const DeferredEventKind kind = classifyDeferredEvent(message);
-    if (kind == DeferredEventKind::None || deferredCount_ >= deferredEvents_.size()) {
+    DeferredLogEvent event{};
+    event.epochSeconds = static_cast<int64_t>(std::time(nullptr));
+    event.uptimeMs = millis();
+    if (!parseDeferredRecorderEvent(message, event)) {
+        event.kind = classifyDeferredEvent(message);
+    }
+    if (event.kind == DeferredLogEventKind::None || !deferredEvents_.push(event)) {
         noteDeferredDrop();
         return false;
     }
-
-    const std::size_t index = (deferredHead_ + deferredCount_) % deferredEvents_.size();
-    deferredEvents_[index] = {
-        static_cast<int64_t>(std::time(nullptr)),
-        millis(),
-        kind,
-    };
-    ++deferredCount_;
     return true;
 }
 
 bool SdLogService::flushDeferred() {
     if (deferred_ || flushingDeferred_) return false;
-    if (deferredCount_ == 0 && deferredDropped_ == 0) return true;
+    if (deferredEvents_.empty() && deferredDropped_ == 0) return true;
     if (!ready_ || snapshot_.state != SdLogState::Ready) return false;
 
     flushingDeferred_ = true;
@@ -419,18 +416,25 @@ bool SdLogService::flushDeferred() {
     }
 
     bool success = true;
-    while (deferredCount_ > 0) {
-        const DeferredEvent event = deferredEvents_[deferredHead_];
-        const char* message = deferredEventMessage(event.kind);
+    while (!deferredEvents_.empty()) {
+        DeferredLogEvent event{};
+        if (!deferredEvents_.peek(event)) {
+            success = false;
+            break;
+        }
+        std::array<char, 96> recorderMessage{};
+        const char* message = deferredEventMessage(event, recorderMessage.data(),
+                                                   recorderMessage.size());
         if (message == nullptr ||
             !writeLogLine(file, message, event.epochSeconds, event.uptimeMs)) {
             success = false;
             break;
         }
-
-        deferredEvents_[deferredHead_] = DeferredEvent{};
-        deferredHead_ = (deferredHead_ + 1) % deferredEvents_.size();
-        --deferredCount_;
+        DeferredLogEvent consumed{};
+        if (!deferredEvents_.pop(consumed)) {
+            success = false;
+            break;
+        }
         ++snapshot_.linesWritten;
     }
 
@@ -455,7 +459,6 @@ bool SdLogService::flushDeferred() {
         return false;
     }
 
-    deferredHead_ = 0;
     refreshUsage();
     return true;
 }
@@ -465,68 +468,71 @@ void SdLogService::noteDeferredDrop() {
 }
 
 void SdLogService::resetDeferredBuffer() {
-    for (auto& event : deferredEvents_) event = DeferredEvent{};
-    deferredHead_ = 0;
-    deferredCount_ = 0;
+    deferredEvents_.clear();
     deferredDropped_ = 0;
 }
 
-SdLogService::DeferredEventKind SdLogService::classifyDeferredEvent(const char* message) {
+DeferredLogEventKind SdLogService::classifyDeferredEvent(const char* message) {
     if (startsWith(message, "MEDIA scan:") || startsWith(message, "MEDIA folder ")) {
-        return DeferredEventKind::MediaLibrary;
+        return DeferredLogEventKind::MediaLibrary;
     }
-    if (startsWith(message, "MEDIA ")) return DeferredEventKind::MediaPlayback;
-    if (startsWith(message, "App ")) return DeferredEventKind::AppState;
+    if (startsWith(message, "MEDIA ")) return DeferredLogEventKind::MediaPlayback;
+    if (startsWith(message, "App ")) return DeferredLogEventKind::AppState;
     if (startsWith(message, "Quick settings") || startsWith(message, "Volume changed:") ||
         startsWith(message, "Settings ") || startsWith(message, "Invalid settings")) {
-        return DeferredEventKind::Settings;
+        return DeferredLogEventKind::Settings;
     }
-    if (startsWith(message, "WiFi ")) return DeferredEventKind::Wifi;
+    if (startsWith(message, "WiFi ")) return DeferredLogEventKind::Wifi;
     if (startsWith(message, "BLE ") || startsWith(message, "Bluetooth ")) {
-        return DeferredEventKind::Bluetooth;
+        return DeferredLogEventKind::Bluetooth;
     }
-    if (startsWith(message, "GPS ")) return DeferredEventKind::Gps;
+    if (startsWith(message, "GPS ")) return DeferredLogEventKind::Gps;
     if (startsWith(message, "Weather ") || startsWith(message, "NTP ")) {
-        return DeferredEventKind::Weather;
+        return DeferredLogEventKind::Weather;
     }
-    if (startsWith(message, "TF ")) return DeferredEventKind::Storage;
-    if (startsWith(message, "SSH ")) return DeferredEventKind::Ssh;
-    if (startsWith(message, "LoRa ")) return DeferredEventKind::Lora;
+    if (startsWith(message, "TF ")) return DeferredLogEventKind::Storage;
+    if (startsWith(message, "SSH ")) return DeferredLogEventKind::Ssh;
+    if (startsWith(message, "LoRa ")) return DeferredLogEventKind::Lora;
     if (startsWith(message, "Async diagnostic events dropped:")) {
-        return DeferredEventKind::Diagnostics;
+        return DeferredLogEventKind::Diagnostics;
     }
     if (startsWith(message, "System ") || startsWith(message, "Resources ") ||
         startsWith(message, "Factory ") ||
         startsWith(message, "Boot ") || startsWith(message, "Board ") ||
         startsWith(message, "=== Pocket Deck")) {
-        return DeferredEventKind::System;
+        return DeferredLogEventKind::System;
     }
-    return DeferredEventKind::None;
+    return DeferredLogEventKind::None;
 }
 
-const char* SdLogService::deferredEventMessage(DeferredEventKind kind) {
-    switch (kind) {
-        case DeferredEventKind::AppState: return "Deferred event: app state changed";
-        case DeferredEventKind::MediaLibrary:
+const char* SdLogService::deferredEventMessage(const DeferredLogEvent& event, char* output,
+                                               std::size_t capacity) {
+    switch (event.kind) {
+        case DeferredLogEventKind::AppState: return "Deferred event: app state changed";
+        case DeferredLogEventKind::MediaLibrary:
             return "Deferred event: MEDIA library state changed";
-        case DeferredEventKind::MediaPlayback:
+        case DeferredLogEventKind::MediaPlayback:
             return "Deferred event: MEDIA playback state changed";
-        case DeferredEventKind::Settings: return "Deferred event: settings changed";
-        case DeferredEventKind::Wifi: return "Deferred event: WiFi state changed";
-        case DeferredEventKind::Bluetooth:
+        case DeferredLogEventKind::Settings: return "Deferred event: settings changed";
+        case DeferredLogEventKind::Wifi: return "Deferred event: WiFi state changed";
+        case DeferredLogEventKind::Bluetooth:
             return "Deferred event: Bluetooth state changed";
-        case DeferredEventKind::Gps: return "Deferred event: GPS state changed";
-        case DeferredEventKind::Weather:
+        case DeferredLogEventKind::Gps: return "Deferred event: GPS state changed";
+        case DeferredLogEventKind::Weather:
             return "Deferred event: weather/time state changed";
-        case DeferredEventKind::Storage:
+        case DeferredLogEventKind::Storage:
             return "Deferred event: TF storage action requested";
-        case DeferredEventKind::Ssh: return "Deferred event: SSH state changed";
-        case DeferredEventKind::Lora: return "Deferred event: LoRa state changed";
-        case DeferredEventKind::System:
+        case DeferredLogEventKind::Ssh: return "Deferred event: SSH state changed";
+        case DeferredLogEventKind::Lora: return "Deferred event: LoRa state changed";
+        case DeferredLogEventKind::System:
             return "Deferred event: system lifecycle changed";
-        case DeferredEventKind::Diagnostics:
+        case DeferredLogEventKind::Diagnostics:
             return "Deferred event: diagnostics queue dropped events";
-        case DeferredEventKind::None: return nullptr;
+        case DeferredLogEventKind::RecorderScan:
+        case DeferredLogEventKind::RecorderState:
+        case DeferredLogEventKind::RecorderExit:
+            return formatDeferredRecorderEvent(event, output, capacity) ? output : nullptr;
+        case DeferredLogEventKind::None: return nullptr;
     }
     return nullptr;
 }

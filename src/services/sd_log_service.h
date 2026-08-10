@@ -4,6 +4,8 @@
 #include <cstddef>
 #include <cstdint>
 
+#include "core/deferred_log_data.h"
+
 class Print;
 
 namespace pd {
@@ -28,7 +30,7 @@ class SdLogService {
 public:
     static constexpr const char* kDirectory = "/PocketDeck";
     static constexpr const char* kLogPath = "/PocketDeck/system.log";
-    static constexpr std::size_t kDeferredEventCapacity = 12;
+    static constexpr std::size_t kDeferredEventCapacity = kDeferredLogQueueCapacity;
 
     bool begin();
     bool remount();
@@ -44,29 +46,6 @@ public:
     static void diagnosticsSink(void* context, const char* message);
 
 private:
-    enum class DeferredEventKind : uint8_t {
-        None,
-        AppState,
-        MediaLibrary,
-        MediaPlayback,
-        Settings,
-        Wifi,
-        Bluetooth,
-        Gps,
-        Weather,
-        Storage,
-        Ssh,
-        Lora,
-        System,
-        Diagnostics,
-    };
-
-    struct DeferredEvent {
-        int64_t epochSeconds = 0;
-        uint32_t uptimeMs = 0;
-        DeferredEventKind kind = DeferredEventKind::None;
-    };
-
     bool mount(bool formatIfMissing);
     void unmount();
     bool ensureDirectory();
@@ -78,15 +57,14 @@ private:
     bool flushDeferred();
     void noteDeferredDrop();
     void resetDeferredBuffer();
-    static DeferredEventKind classifyDeferredEvent(const char* message);
-    static const char* deferredEventMessage(DeferredEventKind kind);
+    static DeferredLogEventKind classifyDeferredEvent(const char* message);
+    static const char* deferredEventMessage(const DeferredLogEvent& event, char* output,
+                                            std::size_t capacity);
     void refreshUsage();
     void setError(const char* message, SdLogState state = SdLogState::Error);
 
     SdLogSnapshot snapshot_{};
-    std::array<DeferredEvent, kDeferredEventCapacity> deferredEvents_{};
-    std::size_t deferredHead_ = 0;
-    std::size_t deferredCount_ = 0;
+    DeferredLogQueue deferredEvents_{};
     uint32_t deferredDropped_ = 0;
     bool ready_ = false;
     bool deferred_ = false;
