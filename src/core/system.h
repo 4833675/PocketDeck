@@ -8,6 +8,7 @@
 #include "apps/launcher/launcher_app.h"
 #include "apps/lora/lora_app.h"
 #include "apps/media/media_app.h"
+#include "apps/motion/motion_app.h"
 #include "apps/settings/settings_app.h"
 #include "apps/ssh/ssh_app.h"
 #include "apps/weather/weather_app.h"
@@ -21,6 +22,7 @@
 #include "services/ble_keyboard_service.h"
 #include "services/diagnostics_service.h"
 #include "services/gps_service.h"
+#include "services/imu_service.h"
 #include "services/lora_service.h"
 #include "services/media_service.h"
 #include "services/sd_log_service.h"
@@ -62,6 +64,7 @@ private:
     Display display_;
     BleKeyboardService bleKeyboard_;
     GpsService gps_;
+    ImuService imu_;
     LoRaService lora_;
     MediaService media_;
     WifiService wifi_;
@@ -78,6 +81,7 @@ private:
     LauncherApp launcher_;
     KeyboardApp keyboard_;
     GpsApp gpsApp_;
+    MotionApp motionApp_;
     LoRaApp loraApp_;
     MediaApp mediaApp_;
     WeatherApp weatherApp_;

@@ -10,6 +10,7 @@ enum class AppId : uint8_t {
     Keyboard,
     Ssh,
     Gps,
+    Motion,
     LoRa,
     Media,
     Weather,
