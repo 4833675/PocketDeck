@@ -301,7 +301,7 @@ to move through its three pages:
 2. `LEVEL / 水平` shows roll and pitch from gravity. Enter (`ENTER ZERO / ENTER
    归零`) makes the current position zero for this session only; it is not saved
    to NVS and resets after restart.
-3. `ACTIVITY / 活动` shows `STILL / 静止`, `MOVING / 运动`, or `SHAKE / 摇晃`, plus
+3. `ACTIVITY / 活动` shows `STILL / 静止`, `MOVING / 运动中`, or `SHAKE / 晃动`, plus
    acceleration magnitude, gyro magnitude, and the session acceleration peak.
    Enter (`ENTER RESET / ENTER清峰`) resets that peak to the current value.
 
