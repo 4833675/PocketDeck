@@ -16,6 +16,7 @@
 #include "apps/media/media_app_model.h"
 #include "apps/media/media_app_text.h"
 #include "apps/motion/motion_app_model.h"
+#include "apps/remote/remote_app_model.h"
 #include "apps/settings/settings_model.h"
 #include "apps/settings/settings_app_text.h"
 #include "apps/weather/weather_app_text.h"
@@ -30,6 +31,7 @@
 #include "core/media_data.h"
 #include "core/motion_data.h"
 #include "core/input_router.h"
+#include "core/ir_data.h"
 #include "core/mac_keymap.h"
 #include "core/resource_policy.h"
 #include "core/serial_command.h"
@@ -1973,6 +1975,112 @@ TEST_CASE(lora_app_does_not_request_duplicate_send_while_transmitting) {
     CHECK(model.sendRejectedVisible(84));
 }
 
+TEST_CASE(sony_ir_code_table_has_all_fixed_sirc_literals) {
+    struct ExpectedCode {
+        SonyIrCommand semantic;
+        uint8_t device;
+        uint8_t command;
+        uint8_t bits;
+    };
+    constexpr std::array<ExpectedCode, 13> expected{{
+        {SonyIrCommand::Up, 151, 0x4F, 15},
+        {SonyIrCommand::Down, 151, 0x50, 15},
+        {SonyIrCommand::Left, 151, 0x4D, 15},
+        {SonyIrCommand::Right, 151, 0x4E, 15},
+        {SonyIrCommand::Ok, 151, 0x4A, 15},
+        {SonyIrCommand::Back, 151, 0x23, 15},
+        {SonyIrCommand::Return, 1, 0x63, 12},
+        {SonyIrCommand::Power, 1, 0x15, 12},
+        {SonyIrCommand::Home, 1, 0x60, 12},
+        {SonyIrCommand::Input, 1, 0x25, 12},
+        {SonyIrCommand::Mute, 1, 0x14, 12},
+        {SonyIrCommand::VolumeDown, 1, 0x13, 12},
+        {SonyIrCommand::VolumeUp, 1, 0x12, 12},
+    }};
+
+    for (const auto& want : expected) {
+        const SonyIrCode* const code = sonyIrCodeFor(want.semantic);
+        CHECK(code != nullptr);
+        if (code == nullptr) continue;
+        CHECK_EQ(code->device, want.device);
+        CHECK_EQ(code->command, want.command);
+        CHECK_EQ(code->bits, want.bits);
+        CHECK_EQ(code->repeats, 2u);
+    }
+    CHECK(sonyIrCodeFor(SonyIrCommand::None) == nullptr);
+}
+
+TEST_CASE(remote_app_model_maps_text_mode_actions_to_semantic_commands) {
+    RemoteAppModel model;
+    struct ExpectedMapping {
+        InputEvent input;
+        SonyIrCommand command;
+    };
+    constexpr std::array<ExpectedMapping, 6> expected{{
+        {{InputAction::Up, '\0'}, SonyIrCommand::Up},
+        {{InputAction::Down, '\0'}, SonyIrCommand::Down},
+        {{InputAction::Left, '\0'}, SonyIrCommand::Left},
+        {{InputAction::Right, '\0'}, SonyIrCommand::Right},
+        {{InputAction::Confirm, '\0'}, SonyIrCommand::Ok},
+        {{InputAction::Erase, '\0'}, SonyIrCommand::Back},
+    }};
+
+    for (const auto& want : expected) {
+        const auto result = model.handle(want.input);
+        CHECK_EQ(result.effect, RemoteAppEffect::SendSony);
+        CHECK_EQ(result.command, want.command);
+    }
+}
+
+TEST_CASE(remote_app_model_maps_text_mode_characters_to_semantic_commands) {
+    RemoteAppModel model;
+    struct ExpectedMapping {
+        char character;
+        SonyIrCommand command;
+    };
+    constexpr std::array<ExpectedMapping, 11> expected{{
+        {'`', SonyIrCommand::Return},
+        {'p', SonyIrCommand::Power}, {'P', SonyIrCommand::Power},
+        {'h', SonyIrCommand::Home}, {'H', SonyIrCommand::Home},
+        {'i', SonyIrCommand::Input}, {'I', SonyIrCommand::Input},
+        {'m', SonyIrCommand::Mute}, {'M', SonyIrCommand::Mute},
+        {'-', SonyIrCommand::VolumeDown}, {'=', SonyIrCommand::VolumeUp},
+    }};
+
+    for (const auto& want : expected) {
+        const auto result = model.handle({InputAction::None, want.character});
+        CHECK_EQ(result.effect, RemoteAppEffect::SendSony);
+        CHECK_EQ(result.command, want.command);
+    }
+}
+
+TEST_CASE(remote_app_model_ignores_non_remote_actions_and_empty_input) {
+    RemoteAppModel model;
+    constexpr std::array<InputAction, 7> ignored{{
+        InputAction::None, InputAction::Back, InputAction::Tab, InputAction::Escape,
+        InputAction::DeleteForward, InputAction::QuickCommands, InputAction::ScrollUp,
+    }};
+
+    for (const auto action : ignored) {
+        const auto result = model.handle({action, '\0'});
+        CHECK_EQ(result.effect, RemoteAppEffect::None);
+        CHECK_EQ(result.command, SonyIrCommand::None);
+    }
+    const auto ignoredActionWithCharacter = model.handle({InputAction::Back, 'p'});
+    CHECK_EQ(ignoredActionWithCharacter.effect, RemoteAppEffect::None);
+    CHECK_EQ(ignoredActionWithCharacter.command, SonyIrCommand::None);
+    const auto downScroll = model.handle({InputAction::ScrollDown, '\0'});
+    CHECK_EQ(downScroll.effect, RemoteAppEffect::None);
+    CHECK_EQ(downScroll.command, SonyIrCommand::None);
+
+    constexpr std::array<char, 4> ignoredCharacters{{'x', 'q', '+', '\0'}};
+    for (const char character : ignoredCharacters) {
+        const auto result = model.handle({InputAction::None, character});
+        CHECK_EQ(result.effect, RemoteAppEffect::None);
+        CHECK_EQ(result.command, SonyIrCommand::None);
+    }
+}
+
 TEST_CASE(media_library_filters_sorts_and_exposes_display_names) {
     MediaLibrary library;
     CHECK(!library.add("/Music/not-a-track.wav", 10));
@@ -2373,6 +2481,10 @@ int main() {
     lora_app_maps_text_edit_send_and_home_actions();
     lora_app_rejected_send_feedback_is_bounded_visible_and_wrap_safe();
     lora_app_does_not_request_duplicate_send_while_transmitting();
+    sony_ir_code_table_has_all_fixed_sirc_literals();
+    remote_app_model_maps_text_mode_actions_to_semantic_commands();
+    remote_app_model_maps_text_mode_characters_to_semantic_commands();
+    remote_app_model_ignores_non_remote_actions_and_empty_input();
     media_library_filters_sorts_and_exposes_display_names();
     media_library_is_bounded_and_selection_wraps();
     media_progress_and_elapsed_clock_are_bounded_and_wrap_safe();
