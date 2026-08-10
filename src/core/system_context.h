@@ -12,6 +12,7 @@ class BleKeyboardService;
 class DiagnosticsService;
 class GpsService;
 class ImuService;
+class IrService;
 class LoRaService;
 class MediaService;
 class SdLogService;
@@ -67,6 +68,7 @@ struct SystemContext {
     BleKeyboardService* bleKeyboard = nullptr;
     GpsService* gps = nullptr;
     ImuService* imu = nullptr;
+    IrService* ir = nullptr;
     LoRaService* lora = nullptr;
     MediaService* media = nullptr;
     WifiService* wifi = nullptr;
