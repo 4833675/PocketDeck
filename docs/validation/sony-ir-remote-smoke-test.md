@@ -41,14 +41,17 @@ the local status.
 
 ## Automated preflight
 
-These checks validate source and build integration only. They never constitute
-evidence that the Cardputer transmitted IR or that the TV received it.
+**Passed (source/build only; no hardware claim).** These checks validate source
+and build integration only. They never constitute evidence that the Cardputer
+transmitted IR or that the TV received it.
 
 | ID | Command | Expected | Result | Evidence |
 |---|---|---|---|---|
 | SONY-BUILD-01 | `scripts/test-native.sh` | Native checks pass | Passed | `PASS: 1340 checks`; source only. |
 | SONY-BUILD-02 | `pio run -e cardputer-adv` | Cardputer Adv target builds | Passed | RAM `91096` bytes; flash `2115145` bytes; source only. |
-| SONY-BUILD-03 | `git diff --check` | No whitespace errors | Passed | Final documentation/report check; no output. |
+
+Run `git diff --check` as an authoring check before handoff. It is not an
+automated evidence row and does not establish a hardware result.
 
 ## Physical Sony KD-65X9100H checks
 
@@ -86,7 +89,7 @@ repeats; do not use a held key as a substitute for repeated presses.
 
 | Area | Status | Blocking issue / follow-up |
 |---|---|---|
-| Automated preflight | Pending | Native/build/diff evidence is not hardware evidence. |
+| Automated preflight | Passed (source/build only; no hardware claim) | Native/build evidence does not prove IR transmission or TV receipt. |
 | Sony command set | Pending | Requires physical Sony KD-65X9100H observation per row. |
 | IR release after G0 exit | Pending | Verify REMOTE resource is inactive after exit. |
 | Cross-app regression | Pending | MEDIA/audio, BLE, Wi-Fi, GPS, LoRa, MOTION, and SSH remain unobserved. |
