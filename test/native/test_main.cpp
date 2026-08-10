@@ -2123,14 +2123,37 @@ TEST_CASE(motion_requires_five_consecutive_non_shake_candidates) {
     CHECK_EQ(classifier.activity(), MotionActivity::Moving);
 }
 
+TEST_CASE(motion_hysteresis_resets_after_candidate_interruption) {
+    MotionClassifier classifier;
+    const MotionSample still{0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f};
+    const MotionSample moving{0.0f, 0.0f, 1.1f, 0.0f, 0.0f, 0.0f};
+
+    for (uint32_t now = 0; now < 4; ++now) classifier.update(still, now);
+    CHECK_EQ(classifier.activity(), MotionActivity::Moving);
+    classifier.update(moving, 4);
+    CHECK_EQ(classifier.activity(), MotionActivity::Moving);
+
+    for (uint32_t now = 5; now < 9; ++now) classifier.update(still, now);
+    CHECK_EQ(classifier.activity(), MotionActivity::Moving);
+    classifier.update(still, 9);
+    CHECK_EQ(classifier.activity(), MotionActivity::Still);
+}
+
 TEST_CASE(motion_shake_latch_is_wrap_safe_and_restarts_hysteresis_after_500_ms) {
     MotionClassifier classifier;
     const MotionSample shake{0.0f, 0.0f, 1.0f, 180.0f, 0.0f, 0.0f};
     const MotionSample still{0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f};
+    const MotionSample latchSample{0.0f, 0.0f, 1.25f, 3.0f, 4.0f, 12.0f};
     constexpr uint32_t start = 0xFFFFFF00u;
 
     classifier.update(shake, start);
     CHECK_EQ(classifier.activity(), MotionActivity::Shake);
+    classifier.update(latchSample, start + 250);
+    CHECK_EQ(classifier.activity(), MotionActivity::Shake);
+    CHECK(std::fabs(classifier.accelerationMagnitude() - 1.25f) < 0.01f);
+    CHECK(std::fabs(classifier.accelerationDeviation() - 0.25f) < 0.01f);
+    CHECK(std::fabs(classifier.gyroMagnitude() - 13.0f) < 0.01f);
+    CHECK(std::fabs(classifier.peakAccelerationDeviation() - 0.25f) < 0.01f);
     for (uint32_t elapsed = 496; elapsed < 500; ++elapsed) {
         classifier.update(still, start + elapsed);
     }
@@ -2275,6 +2298,7 @@ int main() {
     motion_still_thresholds_are_strict();
     motion_shake_thresholds_are_inclusive();
     motion_requires_five_consecutive_non_shake_candidates();
+    motion_hysteresis_resets_after_candidate_interruption();
     motion_shake_latch_is_wrap_safe_and_restarts_hysteresis_after_500_ms();
     motion_peak_tracks_maximum_and_reset_uses_current_sample();
     return pd_test::finish();
