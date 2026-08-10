@@ -57,6 +57,7 @@ const char* appName(AppId id) {
         case AppId::Ssh: return "SSH";
         case AppId::Gps: return "GPS";
         case AppId::Motion: return "MOTION";
+        case AppId::Remote: return "REMOTE";
         case AppId::LoRa: return "LORA";
         case AppId::Media: return "MEDIA";
         case AppId::Weather: return "WEATHER";
@@ -76,6 +77,7 @@ void System::begin() {
     context_.bleKeyboard = &bleKeyboard_;
     context_.gps = &gps_;
     context_.imu = &imu_;
+    context_.ir = &ir_;
     context_.lora = &lora_;
     context_.media = &media_;
     context_.wifi = &wifi_;
@@ -273,6 +275,7 @@ App* System::appForId(AppId id) {
     if (id == AppId::Ssh) return &sshApp_;
     if (id == AppId::Gps) return &gpsApp_;
     if (id == AppId::Motion) return &motionApp_;
+    if (id == AppId::Remote) return &remoteApp_;
     if (id == AppId::LoRa) return &loraApp_;
     if (id == AppId::Media) return &mediaApp_;
     if (id == AppId::Weather) return &weatherApp_;
@@ -294,22 +297,24 @@ void System::applyResourceProfile(AppId id) {
     const bool wifiActive = settings_.wifiEnabled && wifiRequested;
     const bool gpsActive = next.needs(RuntimeResource::Gps);
     const bool imuRequested = next.needs(RuntimeResource::Imu);
+    const bool irRequested = next.needs(RuntimeResource::Ir);
     const bool loraActive = next.needs(RuntimeResource::LoRa);
     bleKeyboard_.setActive(bleRequested);
     wifi_.setActive(wifiRequested);
     gps_.setActive(gpsActive);
     imu_.setActive(imuRequested);
+    ir_.setActive(irRequested);
     lora_.setActive(loraActive);
     activeResources_ = next;
 
     // Leaving MEDIA happens only after MediaApp::onExit closes the MP3 file, so
     // flushing queued events cannot contend with an active decoder read.
     if (!realtimeMedia) sdLog_.setDeferred(false);
-    diagnostics_.logf("Resources app=%s BLE=%d WIFI=%d GPS=%d IMU=%d LORA=%d LOG=%s",
-                      appName(id), bleActive ? 1 : 0, wifiActive ? 1 : 0,
-                      gpsActive ? 1 : 0, imu_.active() ? 1 : 0,
-                      loraActive ? 1 : 0,
-                      realtimeMedia ? "deferred" : "active");
+    diagnostics_.logf(
+        "Resources app=%s BLE=%d WIFI=%d GPS=%d IMU=%d IR=%d LORA=%d LOG=%s",
+        appName(id), bleActive ? 1 : 0, wifiActive ? 1 : 0,
+        gpsActive ? 1 : 0, imu_.active() ? 1 : 0, ir_.active() ? 1 : 0,
+        loraActive ? 1 : 0, realtimeMedia ? "deferred" : "active");
 }
 
 void System::openApp(AppId id) {

@@ -106,13 +106,37 @@ TEST_CASE(motion_is_the_only_app_requesting_the_imu) {
     CHECK(!motion.needs(RuntimeResource::LoRa));
     CHECK(!motion.needs(RuntimeResource::MediaRealtime));
 
-    constexpr std::array<AppId, 9> otherApps{
+    constexpr std::array<AppId, 10> otherApps{
         AppId::None,     AppId::Launcher, AppId::Keyboard,
-        AppId::Ssh,      AppId::Gps,      AppId::LoRa,
-        AppId::Media,    AppId::Weather,  AppId::Settings,
+        AppId::Ssh,      AppId::Gps,      AppId::Remote,
+        AppId::LoRa,     AppId::Media,    AppId::Weather,
+        AppId::Settings,
     };
     for (const AppId app : otherApps) {
         CHECK(!resourceProfileFor(app).needs(RuntimeResource::Imu));
+    }
+}
+
+TEST_CASE(remote_is_the_only_app_requesting_ir) {
+    CHECK_EQ(resourceMask(RuntimeResource::Ir), 1u << 6u);
+
+    const auto remote = resourceProfileFor(AppId::Remote);
+    CHECK(remote.needs(RuntimeResource::Ir));
+    CHECK(!remote.needs(RuntimeResource::Ble));
+    CHECK(!remote.needs(RuntimeResource::Wifi));
+    CHECK(!remote.needs(RuntimeResource::Gps));
+    CHECK(!remote.needs(RuntimeResource::LoRa));
+    CHECK(!remote.needs(RuntimeResource::MediaRealtime));
+    CHECK(!remote.needs(RuntimeResource::Imu));
+
+    constexpr std::array<AppId, 10> otherApps{
+        AppId::None,     AppId::Launcher, AppId::Keyboard,
+        AppId::Ssh,      AppId::Gps,      AppId::Motion,
+        AppId::LoRa,     AppId::Media,    AppId::Weather,
+        AppId::Settings,
+    };
+    for (const AppId app : otherApps) {
+        CHECK(!resourceProfileFor(app).needs(RuntimeResource::Ir));
     }
 }
 
@@ -524,6 +548,8 @@ TEST_CASE(launcher_starts_on_keyboard_and_wraps) {
     model.handle(InputAction::Right);
     CHECK_EQ(model.selected(), AppId::Motion);
     model.handle(InputAction::Right);
+    CHECK_EQ(model.selected(), AppId::Remote);
+    model.handle(InputAction::Right);
     CHECK_EQ(model.selected(), AppId::LoRa);
     model.handle(InputAction::Right);
     CHECK_EQ(model.selected(), AppId::Media);
@@ -548,6 +574,8 @@ TEST_CASE(launcher_confirm_requests_selected_app) {
     CHECK_EQ(model.handle(InputAction::Confirm), AppId::Gps);
     model.handle(InputAction::Right);
     CHECK_EQ(model.handle(InputAction::Confirm), AppId::Motion);
+    model.handle(InputAction::Right);
+    CHECK_EQ(model.handle(InputAction::Confirm), AppId::Remote);
     model.handle(InputAction::Right);
     CHECK_EQ(model.handle(InputAction::Confirm), AppId::LoRa);
     model.handle(InputAction::Right);
@@ -2383,6 +2411,7 @@ TEST_CASE(motion_peak_tracks_maximum_and_reset_uses_current_sample) {
 int main() {
     app_resource_profiles_isolate_foreground_workloads();
     motion_is_the_only_app_requesting_the_imu();
+    remote_is_the_only_app_requesting_ir();
     weather_and_media_profiles_have_explicit_tradeoffs();
     ssh_error_detail_redacts_endpoint_identity();
     ssh_error_detail_stays_single_line_and_never_partially_copies_secret();

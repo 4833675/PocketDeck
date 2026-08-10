@@ -25,6 +25,7 @@ const char* appTitle(AppId id, UiLanguage language) {
         case AppId::Ssh: return localized(language, "SSH TERMINAL", "SSH 终端");
         case AppId::Gps: return localized(language, "GPS", "GPS 定位");
         case AppId::Motion: return localized(language, "MOTION", "运动");
+        case AppId::Remote: return localized(language, "REMOTE", "遥控器");
         case AppId::LoRa: return localized(language, "LORA", "LoRa 通信");
         case AppId::Media: return localized(language, "MEDIA", "媒体");
         case AppId::Weather: return localized(language, "WEATHER", "天气");
@@ -50,6 +51,7 @@ const char* appIcon(AppId id) {
         case AppId::Ssh: return "$_";
         case AppId::Gps: return "G+";
         case AppId::Motion: return "IM";
+        case AppId::Remote: return "IR";
         case AppId::LoRa: return "LR";
         case AppId::Media: return "MP";
         case AppId::Weather: return "WX";
@@ -124,6 +126,9 @@ void LauncherApp::render(Display& display, const SystemContext& context) {
         std::snprintf(subtitle, sizeof(subtitle), "%s",
                       localized(language, "Accelerometer + gyro",
                                 "加速度计 + 陀螺仪"));
+    } else if (model_.selected() == AppId::Remote) {
+        std::snprintf(subtitle, sizeof(subtitle), "%s",
+                      localized(language, "Sony TV control", "Sony 电视遥控"));
     } else if (model_.selected() == AppId::LoRa) {
         std::snprintf(subtitle, sizeof(subtitle), "%s",
                       localized(language, "Raw 868 MHz terminal", "868 MHz 文本终端"));

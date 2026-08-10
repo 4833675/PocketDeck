@@ -9,6 +9,7 @@
 #include "apps/lora/lora_app.h"
 #include "apps/media/media_app.h"
 #include "apps/motion/motion_app.h"
+#include "apps/remote/remote_app.h"
 #include "apps/settings/settings_app.h"
 #include "apps/ssh/ssh_app.h"
 #include "apps/weather/weather_app.h"
@@ -23,6 +24,7 @@
 #include "services/diagnostics_service.h"
 #include "services/gps_service.h"
 #include "services/imu_service.h"
+#include "services/ir_service.h"
 #include "services/lora_service.h"
 #include "services/media_service.h"
 #include "services/sd_log_service.h"
@@ -65,6 +67,7 @@ private:
     BleKeyboardService bleKeyboard_;
     GpsService gps_;
     ImuService imu_;
+    IrService ir_;
     LoRaService lora_;
     MediaService media_;
     WifiService wifi_;
@@ -82,6 +85,7 @@ private:
     KeyboardApp keyboard_;
     GpsApp gpsApp_;
     MotionApp motionApp_;
+    RemoteApp remoteApp_;
     LoRaApp loraApp_;
     MediaApp mediaApp_;
     WeatherApp weatherApp_;
