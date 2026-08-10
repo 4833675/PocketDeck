@@ -26,6 +26,8 @@ Current firmware: **0.9.6**
 - Interactive SSH terminal with six saved hosts, public-key authentication,
   ANSI colors, local scrollback, reconnect, and quick commands.
 - Four-page GNSS dashboard for the optional M5Stack Cap LoRa-1262.
+- Three-page bilingual MOTION dashboard for the built-in BMI270 accelerometer
+  and gyroscope.
 - Raw LoRa P2P text terminal for a matching SX1262/RadioLib peer.
 - Foreground MP3 player with four-level folder browsing and Chinese filenames
   under `/Music` on a TF card.
@@ -95,7 +97,8 @@ The Cardputer has no dedicated arrow cluster, so local navigation uses Fn:
 | G0 tap | Home |
 | G0 hold for 600 ms | Quick Settings |
 
-Home contains Keyboard, SSH Terminal, GPS, LORA, MEDIA, Weather, and Settings.
+Home contains Keyboard, SSH Terminal, GPS, MOTION, LORA, MEDIA, Weather, and
+Settings.
 The status bar shows local 24-hour time, `WiFi`, `BT`, and battery percentage.
 Wi-Fi and Bluetooth are mint when connected, amber when active but
 disconnected, red when explicitly disabled, and muted gray when the foreground
@@ -286,6 +289,51 @@ NMEA. A valid stream can still show `SEARCHING` until the ceramic antenna has a
 clear outdoor view and acquires satellites. Cold starts can take several
 minutes.
 
+## MOTION sensor
+
+MOTION / 运动 uses the Cardputer Adv's **BMI270 accelerometer and gyroscope**.
+It has no magnetometer, so it does not provide a compass, heading, or absolute
+orientation. Enter it from Home and use Tab, Fn + Left/Right, or Fn + Up/Down
+to move through its three pages:
+
+1. `LIVE / 实时` shows X/Y/Z acceleration in `g` and X/Y/Z angular velocity in
+   `deg/s`.
+2. `LEVEL / 水平` shows roll and pitch from gravity. Enter (`ENTER ZERO / ENTER
+   归零`) makes the current position zero for this session only; it is not saved
+   to NVS and resets after restart.
+3. `ACTIVITY / 活动` shows `STILL / 静止`, `MOVING / 运动`, or `SHAKE / 摇晃`, plus
+   acceleration magnitude, gyro magnitude, and the session acceleration peak.
+   Enter (`ENTER RESET / ENTER清峰`) resets that peak to the current value.
+
+Backspace or G0 returns Home from every MOTION page. The page footers use the
+same localized controls: `BKSP/G0 HOME` / `BKSP/G0 返回`.
+
+While MOTION is foreground, the IMU is sampled at 50 Hz and the screen renders
+at up to 30 Hz. Let `a = (ax, ay, az)` in `g` and `w = (gx, gy, gz)` in
+`deg/s`. The app displays `|a| = sqrt(ax² + ay² + az²)`, acceleration deviation
+`abs(|a| - 1)`, and `|w| = sqrt(gx² + gy² + gz²)`. Level uses gravity-derived
+roll/pitch with a light 0.2 smoothing filter; it is a visual level, not a
+navigation instrument.
+
+Activity is `STILL` when acceleration deviation is below `0.08 g` **and** gyro
+magnitude is below `10 deg/s`. It becomes `SHAKE` when deviation is at least
+`0.45 g` **or** gyro magnitude is at least `180 deg/s`; SHAKE appears
+immediately and stays visible for at least 500 ms. Other readings are
+`MOVING`. Changes between STILL and MOVING require five consecutive candidate
+samples to avoid flicker. These thresholds are fixed for this version and are
+not medical, fitness, fall-detection, or navigation measurements.
+
+MOTION samples only while it is foreground; leaving with Backspace or G0
+returns to the Launcher profile and stops IMU polling. It produces no raw
+motion, axis, gesture, or activity records in diagnostics or TF logs. If the
+BMI270 is unavailable, the page remains navigable and shows `IMU UNAVAILABLE /
+IMU 不可用`; if it is available but no complete accel-and-gyro sample has arrived,
+it shows `WAITING FOR SAMPLE / 等待传感器数据`.
+
+See the [MOTION hardware checklist](docs/validation/motion-smoke-test.md).
+Compilation and native tests do not prove sensor orientation, rates, or gesture
+behavior on a physical device.
+
 ## LoRa text terminal
 
 With the optional Cap LoRa-1262 attached, open LORA from Home. **Attach the Cap
@@ -426,6 +474,7 @@ from diagnostics.
 - [Architecture decisions](docs/architecture/)
 - [Hardware validation checklists](docs/validation/)
 - [GPS hardware checklist](docs/validation/gps-smoke-test.md)
+- [MOTION hardware checklist](docs/validation/motion-smoke-test.md)
 - [LoRa text-terminal checklist](docs/validation/lora-text-terminal-smoke-test.md)
 - [MEDIA MP3 checklist](docs/validation/media-mp3-smoke-test.md)
 - [System event-log checklist](docs/validation/system-event-log-smoke-test.md)
@@ -436,7 +485,7 @@ Source layout:
 src/core/       lifecycle, state, policies, input routing, portable models
 src/drivers/    Cardputer board and display adapters
 src/services/   BLE, Wi-Fi, SSH, GPS, LoRa, MEDIA, weather, NVS, TF diagnostics
-src/apps/       launcher, Keyboard, SSH, GPS, LORA, MEDIA, Weather, Settings
+src/apps/       launcher, Keyboard, SSH, GPS, MOTION, LORA, MEDIA, Weather, Settings
 src/ui/         shared status bar and Quick Settings
 test/native/    hardware-independent C++ tests
 ```

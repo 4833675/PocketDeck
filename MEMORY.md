@@ -1,35 +1,24 @@
 # Pocket Deck project memory
 
-Last updated: 2026-08-06
+Last updated: 2026-08-10
 
 This is the current handoff for the Pocket Deck repository. Read it with
 `AGENTS.md`; use `README.md` for public usage instructions.
 
 ## Current state
 
-- Repository: `https://github.com/4833675/PocketDeck`, branch `main`.
-- Current `v0.9.6` localizes all product UI and adds deterministic SSH heap headroom.
-- v0.9.6 reached a public-key shell over direct Wi-Fi on real hardware.
-- Automated validation passed 1,104 checks; the build used 90,952 bytes RAM
-  (27.8%) and 2,099,445 bytes flash (66.7%).
-- No LoRa Cap, antenna, RF, or two-endpoint hardware claim has been made.
-- A MEDIA `tracks=0` incident was traced from TF evidence to stale v0.6 firmware,
-  whose scanner was non-recursive. v0.7.0 and then v0.7.1 were uploaded without
-  clearing NVS; USB `HELP` confirmed the new `system.log` command path.
-- Real-device logs confirmed BLE reconnect, successful Wi-Fi scans, and a manual
-  Tab scan (`raw=29`, strongest 8 displayed). The one migrated saved SSID was
-  not visible at the test location (`candidates=0`), which is expected.
-- Still awaiting user validation: the LoRa two-endpoint checklist, GPS 4/4
-  moving/stationary/invalid/stale checks, remaining Pocket SSH rows, second-Wi-Fi
-  save, restart/reconnect, strongest-known selection, fallback, and deletion.
-- v0.8.0 was uploaded without erasing NVS; USB `LOG STATUS` reported TF logging
-  ready/mounted. MEDIA playback is now smooth and BLE Keyboard works after
-  app-scoped suspend/resume, as confirmed on the real device.
-- v0.9.1 gives a dropped link a direct reconnect before profile scans, applies
-  2/5/15/30-second scan backoff, and logs driver disconnect/LOST_IP reasons;
-  real range-loss and long-running SSH/Weather validation remain pending.
-- v0.9.6 was uploaded without erasing NVS; TF logs recorded 85,380 bytes free
-  at SSH init and 41,240 at shell-ready. The owner confirmed the connection.
+- Repository: `https://github.com/4833675/PocketDeck`; worktree branch
+  `feature/motion-recorder-ir`, public firmware version `0.9.6`.
+- The branch adds MOTION / 运动: built-in BMI270 acceleration and gyroscope only,
+  with LIVE, session-zero LEVEL, and session-peak ACTIVITY pages. It is not a
+  compass: no magnetometer, heading, or raw motion logging exists.
+- Motion sampling is foreground-only at 50 Hz and rendering up to 30 Hz. STILL
+  is `<0.08 g` and `<10 deg/s`; SHAKE is `>=0.45 g` or `>=180 deg/s`, immediate,
+  500 ms latched; other transitions need five samples. Physical motion rows pending.
+- Native/target evidence: 1,182 checks, 91,080-byte RAM, 2,108,053-byte flash;
+  not proof of IMU availability, orientation, rate, zero, shake, or isolation.
+- Existing hardware evidence: v0.9.6 SSH over direct Wi-Fi, BLE reconnect,
+  Wi-Fi scan, TF logging, and MEDIA playback; LoRa/GPS/SSH/multi-Wi-Fi pending.
 
 ## Product identity
 
@@ -41,6 +30,8 @@ and must remain untouched unless explicitly selected.
 Current apps and services:
 
 - Runtime English / Chinese across every app, Settings, and Quick Settings.
+- MOTION / 运动: foreground-only BMI270 accelerometer + gyroscope dashboard;
+  no magnetometer/compass, persistent calibration, or raw sample logging.
 - Secure single-host BLE keyboard for macOS, implemented with NimBLE-Arduino
   1.4.3 and a six-digit display-only pairing flow.
 - Runtime English / Simplified Chinese four-page GPS dashboard for the optional
@@ -62,6 +53,7 @@ Current apps and services:
 - Partition layout: NVS + one 3 MB app + LittleFS; no OTA slot.
 - Keyboard: TCA8418 matrix through M5Cardputer 1.1.1.
 - GPS Cap: NMEA UART at 115200, Cardputer RX GPIO15 / TX GPIO13.
+- Built-in IMU: BMI270 accelerometer + gyroscope; active only for MOTION.
 - BLE/Wi-Fi share 2.4 GHz airtime; ESP32-S3 cannot see 5 GHz-only SSIDs.
 - SX1262 uses NSS G5, DIO1 G4, reset G3, busy G6 and shared SPI G40/G14/G39.
   TF CS is G12; inactive chip selects stay high and all radio calls run from the
@@ -80,6 +72,8 @@ Current apps and services:
 - Wi-Fi profile model/store: `src/core/wifi_profiles.*`,
   `src/services/wifi_profile_store.*`.
 - GPS/weather: `src/services/gps_service.*`, `weather_service.*`.
+- IMU/MOTION: `src/services/imu_service.*`, `src/core/motion_data.*`, and
+  `src/apps/motion/`.
 - LoRa: `src/core/lora_data.*`, `src/services/lora_service.*`, and
   `src/apps/lora/`; `System` owns the service and calls its update loop.
 - MEDIA: `src/core/media_data.*`, `src/services/media_service.*`, and
@@ -112,6 +106,11 @@ Current apps and services:
   only refreshing requires fresh inputs.
 - GPS `RX CHARS` alone does not prove valid NMEA. Use checksum OK/ERR and UTC to
   distinguish signal acquisition from serial corruption.
+- MOTION reads accel+gyro only in its foreground profile, at a 20 ms minimum
+  interval; normal render is 33 ms. Never add compass claims or raw diagnostics.
+- LEVEL zero and ACTIVITY peak reset are RAM-only. STILL is strict below both
+  0.08 g/10 deg/s, SHAKE inclusive at either 0.45 g/180 deg/s and latches 500 ms;
+  non-shake changes require five candidate samples.
 - LoRa uses RadioLib 7.7.1 raw P2P only: 868.0 MHz, 125.0 kHz, SF12, 4/5,
   `0x34`, +22 dBm, 20-symbol preamble, 3.0 V TCXO, 140 mA. No custom header,
   encryption, addressing, ACK, retry, persistence, notification, or hidden TX
@@ -173,27 +172,28 @@ Serial log commands: `HELP`, `LOG STATUS`, `LOG DUMP`, `LOG DUMP ALL`, and
 ## Near-term validation
 
 1. Run `localization-smoke-test.md` on v0.9.6 across every app and Quick Settings.
-2. Run `resource-isolation-smoke-test.md`; prioritize MEDIA
+2. Run `docs/validation/motion-smoke-test.md`; all axis, zero, stationary,
+   shake/latch, exit/isolation, unavailable, and regression rows are pending.
+3. Run `resource-isolation-smoke-test.md`; prioritize MEDIA
    continuity, no Wi-Fi/BT work during playback, deferred-log flush, and bond/profile survival.
-3. Stay inside SSH or Weather for several minutes and validate direct reconnect,
+4. Stay inside SSH or Weather for several minutes and validate direct reconnect,
    scan backoff, and the new disconnect/LOST_IP reason logs.
-4. Run `docs/validation/lora-text-terminal-smoke-test.md` with antenna attached
+5. Run `docs/validation/lora-text-terminal-smoke-test.md` with antenna attached
    and a matching second SX1262/RadioLib endpoint; all RF, shared-SPI, and
    regression rows remain pending until observed.
-5. Run the new GPS 4/4 moving, stationary, invalid, and stale-motion rows
+6. Run the new GPS 4/4 moving, stationary, invalid, and stale-motion rows
    outdoors without sharing precise coordinates.
-6. Continue the SSH checklist with two more cold boots, then controls, scrollback, and reconnect.
-7. Recheck BLE, Wi-Fi, weather, GPS, heap, and UI responsiveness after the SSH
+7. Continue the SSH checklist with two more cold boots, then controls, scrollback, and reconnect.
+8. Recheck BLE, Wi-Fi, weather, GPS, heap, and UI responsiveness after the SSH
    worker has been created.
-8. Connect a second 2.4 GHz network and confirm both entries appear under Saved
+9. Connect a second 2.4 GHz network and confirm both entries appear under Saved
    networks and saved scan rows show `S`.
-9. Restart near each network separately and confirm automatic connection.
-10. Make both visible and confirm strongest-known selection; then make the first
+10. Restart near each network separately and confirm automatic connection.
+11. Make both visible and confirm strongest-known selection; then make the first
    candidate fail and confirm fallback.
-11. Delete one profile and verify the other survives restart.
-12. Recheck BLE typing/range-loss reconnect and confirm Wi-Fi scans occur only
-    inside SSH, Weather, or Settings.
+12. Delete one profile and verify the other survives restart.
+13. Recheck BLE typing/range-loss reconnect and confirm Wi-Fi scans occur only
+   inside SSH, Weather, or Settings.
 
-Use the matching files in `docs/validation/` to record results. After the device
-owner confirms behavior, update this section, commit locally, and push only if
-explicitly requested.
+Use the matching files in `docs/validation/` to record results. After the owner
+confirms behavior, update this section, commit locally, and push only if requested.
