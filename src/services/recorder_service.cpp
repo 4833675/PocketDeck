@@ -158,7 +158,10 @@ bool RecorderService::startRecording(bool storageMounted, int64_t utcEpochSecond
     activeStorageMounted_ = storageMounted;
 
     if (state_ == RecorderState::Playing || playbackFile_) {
-        if (!stopPlaybackInternal(persistedVolumePercent_, false)) {
+        // A failed NoCard transition must still return the shared audio path to
+        // the persisted Speaker state. A normal capture transition leaves it
+        // stopped because stopSpeakerForCapture() follows immediately.
+        if (!stopPlaybackInternal(persistedVolumePercent_, !storageMounted)) {
             setError(RecorderError::SpeakerStartFailed);
             return false;
         }
@@ -279,7 +282,6 @@ bool RecorderService::primeCapture(uint32_t nowMs) {
     capturePhase_ = CapturePhase::Waking;
     captureObservedDepth_ = 0;
     captureWakeDeadlineMs_ = nowMs + kMicWakeTimeoutMs;
-    captureWakingBuffer_ = 0;
     return true;
 }
 
@@ -290,13 +292,11 @@ bool RecorderService::queueCapture(uint8_t bufferIndex) {
         return false;
     }
 
-    int16_t* buffer = captureData(bufferIndex);
-    std::fill_n(buffer, kCaptureSamples, kCaptureSentinel);
-
     // Invariant: record() is called only when our FIFO proves one of
     // M5Unified's two internal descriptors is free. The array is not written or
     // reused again until a later observed depth decrease releases this FIFO row.
-    if (!M5Cardputer.Mic.record(buffer, kCaptureSamples, kSampleRate, false)) {
+    if (!M5Cardputer.Mic.record(captureData(bufferIndex), kCaptureSamples,
+                               kSampleRate, false)) {
         return false;
     }
     const uint8_t tail = static_cast<uint8_t>((captureFifoHead_ + captureQueued_) % 2);
@@ -322,27 +322,9 @@ bool RecorderService::processCapture(uint32_t nowMs, bool allowRequeue) {
     if (capturePhase_ == CapturePhase::Waking) {
         if (hardwareDepth == 0) {
             if (!deadlineReached(nowMs, captureWakeDeadlineMs_)) return true;
-
-            // isRecording() can miss a complete 64 ms block. At depth zero it
-            // is safe to inspect the sentinel, but never while Mic reports an
-            // owned descriptor. Any changed sample proves this block completed.
-            if (captureWakingBuffer_ < captureQueuedFlags_.size() &&
-                captureQueuedFlags_[captureWakingBuffer_] &&
-                !captureBufferUntouched(captureWakingBuffer_)) {
-                if (!releaseCompletedCapture(0)) return false;
-                captureObservedDepth_ = 0;
-                captureWakingBuffer_ = kInvalidBufferIndex;
-                if (!allowRequeue) {
-                    capturePhase_ = CapturePhase::Idle;
-                    return true;
-                }
-                if (!primeCapture(nowMs)) {
-                    setError(RecorderError::MicQueueFailed);
-                    return false;
-                }
-                return true;
-            }
-
+            // Public Mic state has no descriptor lock, so a late worker could
+            // acquire this pointer after any zero-depth check. Conservative
+            // failure avoids reading, writing, or reusing that uncertain array.
             setError(RecorderError::MicWakeTimeout);
             return false;
         }
@@ -352,7 +334,6 @@ bool RecorderService::processCapture(uint32_t nowMs, bool allowRequeue) {
         if (!releaseCompletedCapture(hardwareDepth)) return false;
         capturePhase_ = CapturePhase::Active;
         captureObservedDepth_ = captureQueued_;
-        captureWakingBuffer_ = kInvalidBufferIndex;
         if (!allowRequeue) return true;
         return refillCapture(nowMs);
     }
@@ -438,7 +419,6 @@ bool RecorderService::refillCapture(uint32_t nowMs) {
         // lets processCapture reconcile FIFO ownership safely.
         capturePhase_ = CapturePhase::Waking;
         captureWakeDeadlineMs_ = nowMs + kMicWakeTimeoutMs;
-        captureWakingBuffer_ = freeBuffer;
     }
     return true;
 }
@@ -616,19 +596,10 @@ void RecorderService::resetCaptureQueue() {
     captureObservedDepth_ = 0;
     capturePhase_ = CapturePhase::Idle;
     captureWakeDeadlineMs_ = 0;
-    captureWakingBuffer_ = kInvalidBufferIndex;
 }
 
 int16_t* RecorderService::captureData(uint8_t bufferIndex) {
     return bufferIndex == 0 ? captureBufferA_.data() : captureBufferB_.data();
-}
-
-bool RecorderService::captureBufferUntouched(uint8_t bufferIndex) const {
-    if (bufferIndex >= captureQueuedFlags_.size()) return true;
-    const auto& buffer = bufferIndex == 0 ? captureBufferA_ : captureBufferB_;
-    return std::all_of(buffer.begin(), buffer.end(), [](int16_t sample) {
-        return sample == kCaptureSentinel;
-    });
 }
 
 void RecorderService::updateWaveform(const int16_t* samples) {

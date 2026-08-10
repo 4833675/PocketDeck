@@ -104,7 +104,6 @@ private:
     static constexpr std::size_t kCaptureSamples = 1024;
     static constexpr std::size_t kPlaybackSamples = 1024;
     static constexpr std::size_t kShortPlaybackFallbackSamples = 256;
-    static constexpr int16_t kCaptureSentinel = 0x5A5A;
 
     bool scanStorage(bool storageMounted, bool updateIdleState);
     bool ensureRecordingsDirectory();
@@ -122,7 +121,6 @@ private:
     void discardCaptureBounded();
     void resetCaptureQueue();
     int16_t* captureData(uint8_t bufferIndex);
-    bool captureBufferUntouched(uint8_t bufferIndex) const;
     void updateWaveform(const int16_t* samples);
     bool finishRecording(bool storageMounted, uint32_t nowMs,
                          uint8_t persistedVolumePercent, bool drainNormally,
@@ -175,7 +173,6 @@ private:
     uint8_t captureObservedDepth_ = 0;
     CapturePhase capturePhase_ = CapturePhase::Idle;
     uint32_t captureWakeDeadlineMs_ = 0;
-    uint8_t captureWakingBuffer_ = kInvalidBufferIndex;
 
     std::array<int8_t, kRecorderWaveformColumns> waveform_{};
     uint8_t levelPercent_ = 0;
