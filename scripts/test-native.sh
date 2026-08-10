@@ -42,6 +42,7 @@ for source in src/core/input_router.cpp src/core/g0_gesture.cpp src/core/system_
               src/apps/lora/lora_app_text.cpp \
               src/apps/media/media_app_model.cpp \
               src/apps/media/media_app_text.cpp \
+              src/apps/recorder/recorder_app_model.cpp \
               src/apps/motion/motion_app_model.cpp \
               src/apps/remote/remote_app_model.cpp \
               src/apps/settings/settings_app_text.cpp \

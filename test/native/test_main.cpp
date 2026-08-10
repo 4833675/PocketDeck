@@ -17,6 +17,7 @@
 #include "apps/media/media_app_text.h"
 #include "apps/motion/motion_app_model.h"
 #include "apps/remote/remote_app_model.h"
+#include "apps/recorder/recorder_app_model.h"
 #include "apps/settings/settings_model.h"
 #include "apps/settings/settings_app_text.h"
 #include "apps/weather/weather_app_text.h"
@@ -2369,6 +2370,148 @@ TEST_CASE(recorder_sequential_candidates_are_fixed_and_bounded) {
     CHECK(!recorderSequentialPath(0, path, 24));
 }
 
+TEST_CASE(recorder_library_keeps_only_direct_wav_children_and_leaf_names) {
+    RecordingLibrary library;
+    CHECK(!recorderPathIsWav(nullptr));
+    CHECK(!recorderPathIsWav("/Recordings/.WAV"));
+    CHECK(!recorderPathIsWav("/Recordings/voice.mp3"));
+    CHECK(!recorderPathIsWav("/Recordings/sub/voice.WAV"));
+    CHECK(!recorderPathIsWav("Recordings/voice.WAV"));
+    CHECK(!recorderPathIsWav("/Elsewhere/voice.WAV"));
+    CHECK(!library.add("/Recordings/0123456789012345678901234567.WAV", 10));
+
+    CHECK(library.add("/Recordings/voice.WaV", 123, RecordingCompatibility::Unsupported));
+    CHECK_EQ(library.size(), 1u);
+    CHECK_EQ(library.at(0).bytes, 123u);
+    CHECK_EQ(library.at(0).compatibility, RecordingCompatibility::Unsupported);
+    CHECK_STR_EQ(recordingEntryName(library.at(0)), "voice.WaV");
+}
+
+TEST_CASE(recorder_library_sorts_newest_first_and_retains_deterministic_cap) {
+    RecordingLibrary ascending;
+    RecordingLibrary descending;
+    for (std::size_t index = 0; index < kRecordingEntryCapacity + 10; ++index) {
+        char path[kRecorderPathCapacity]{};
+        std::snprintf(path, sizeof(path), "/Recordings/REC_%04u.WAV",
+                      static_cast<unsigned>(index));
+        ascending.add(path, static_cast<uint32_t>(index));
+    }
+    for (std::size_t index = kRecordingEntryCapacity + 10; index > 0; --index) {
+        char path[kRecorderPathCapacity]{};
+        std::snprintf(path, sizeof(path), "/Recordings/REC_%04u.WAV",
+                      static_cast<unsigned>(index - 1));
+        descending.add(path, static_cast<uint32_t>(index - 1));
+    }
+    ascending.sort();
+    descending.sort();
+
+    CHECK_EQ(ascending.size(), kRecordingEntryCapacity);
+    CHECK(ascending.truncated());
+    CHECK_EQ(descending.size(), kRecordingEntryCapacity);
+    CHECK(descending.truncated());
+    CHECK_STR_EQ(recordingEntryName(ascending.at(0)), "REC_0073.WAV");
+    CHECK_STR_EQ(recordingEntryName(ascending.at(kRecordingEntryCapacity - 1)),
+                 "REC_0010.WAV");
+    for (std::size_t index = 0; index < kRecordingEntryCapacity; ++index) {
+        CHECK_STR_EQ(ascending.at(index).path.data(), descending.at(index).path.data());
+    }
+}
+
+TEST_CASE(recorder_library_selection_wraps_and_stays_bounded_after_sort_and_clear) {
+    RecordingLibrary library;
+    CHECK(library.add("/Recordings/REC_0001.WAV", 1));
+    CHECK(library.add("/Recordings/REC_0002.WAV", 2));
+    library.sort();
+    CHECK_EQ(library.selectedIndex(), 0u);
+    library.moveSelection(-1);
+    CHECK_EQ(library.selectedIndex(), 1u);
+    library.moveSelection(1);
+    CHECK_EQ(library.selectedIndex(), 0u);
+    library.select(1);
+    CHECK_EQ(library.selectedIndex(), 1u);
+    library.sort();
+    CHECK_EQ(library.selectedIndex(), 0u);
+    library.clear();
+    library.moveSelection(-1);
+    CHECK_EQ(library.selectedIndex(), 0u);
+    CHECK_EQ(library.at(0).bytes, 0u);
+}
+
+TEST_CASE(recorder_app_model_switches_pages_only_while_audio_is_idle) {
+    RecorderAppModel model;
+    const RecorderAppInputState idle{true, false, false};
+    const RecorderAppInputState recording{true, true, false};
+    const RecorderAppInputState playing{true, false, true};
+
+    CHECK_EQ(model.page(), RecorderPage::Record);
+    CHECK_EQ(model.handle({InputAction::Tab, '\0'}, recording).effect, RecorderAppEffect::None);
+    CHECK_EQ(model.page(), RecorderPage::Record);
+    CHECK_EQ(model.handle({InputAction::Tab, '\0'}, playing).effect, RecorderAppEffect::None);
+    CHECK_EQ(model.page(), RecorderPage::Record);
+    CHECK_EQ(model.handle({InputAction::Tab, '\0'}, idle).effect, RecorderAppEffect::None);
+    CHECK_EQ(model.page(), RecorderPage::Files);
+    CHECK_EQ(model.handle({InputAction::Tab, '\0'}, playing).effect, RecorderAppEffect::None);
+    CHECK_EQ(model.page(), RecorderPage::Files);
+    CHECK_EQ(model.handle({InputAction::Tab, '\0'}, idle).effect, RecorderAppEffect::None);
+    CHECK_EQ(model.page(), RecorderPage::Record);
+}
+
+TEST_CASE(recorder_app_model_emits_record_play_selection_and_delete_effects) {
+    RecorderAppModel model;
+    const RecorderAppInputState empty{};
+    const RecorderAppInputState entries{true, false, false};
+    const RecorderAppInputState recording{false, true, false};
+    const RecorderAppInputState playing{true, false, true};
+
+    CHECK_EQ(model.handle({InputAction::Confirm, '\0'}, empty).effect,
+             RecorderAppEffect::StartRecording);
+    CHECK_EQ(model.handle({InputAction::Confirm, '\0'}, recording).effect,
+             RecorderAppEffect::StopRecording);
+    CHECK_EQ(model.handle({InputAction::None, 'd'}, entries).effect, RecorderAppEffect::None);
+    CHECK_EQ(model.page(), RecorderPage::Record);
+
+    model.handle({InputAction::Tab, '\0'}, entries);
+    CHECK_EQ(model.handle({InputAction::Up, '\0'}, entries).effect,
+             RecorderAppEffect::SelectPrevious);
+    CHECK_EQ(model.handle({InputAction::Down, '\0'}, entries).effect,
+             RecorderAppEffect::SelectNext);
+    CHECK_EQ(model.handle({InputAction::Confirm, '\0'}, entries).effect,
+             RecorderAppEffect::StartPlayback);
+    CHECK_EQ(model.handle({InputAction::Confirm, '\0'}, playing).effect,
+             RecorderAppEffect::StopPlayback);
+    CHECK_EQ(model.handle({InputAction::None, 'd'}, empty).effect, RecorderAppEffect::None);
+    CHECK_EQ(model.page(), RecorderPage::Files);
+    CHECK_EQ(model.handle({InputAction::None, 'd'}, entries).effect, RecorderAppEffect::None);
+    CHECK_EQ(model.page(), RecorderPage::DeleteConfirm);
+    CHECK_EQ(model.handle({InputAction::Tab, '\0'}, entries).effect, RecorderAppEffect::None);
+    CHECK_EQ(model.page(), RecorderPage::DeleteConfirm);
+    CHECK_EQ(model.handle({InputAction::Erase, '\0'}, entries).effect, RecorderAppEffect::None);
+    CHECK_EQ(model.page(), RecorderPage::Files);
+    model.handle({InputAction::None, 'd'}, entries);
+    CHECK_EQ(model.handle({InputAction::Confirm, '\0'}, entries).effect,
+             RecorderAppEffect::DeleteSelected);
+    CHECK_EQ(model.page(), RecorderPage::Files);
+}
+
+TEST_CASE(recorder_app_model_keeps_character_commands_distinct_and_cleans_up_on_exit) {
+    RecorderAppModel model;
+    const RecorderAppInputState entries{true, false, false};
+    CHECK_EQ(model.handle({InputAction::None, 'x'}, entries).effect, RecorderAppEffect::None);
+    CHECK_EQ(model.handle({InputAction::Confirm, 'd'}, entries).effect,
+             RecorderAppEffect::StartRecording);
+    CHECK_EQ(model.page(), RecorderPage::Record);
+    CHECK_EQ(model.handle({InputAction::Back, '\0'}, entries).effect, RecorderAppEffect::GoHome);
+    CHECK_EQ(model.handle({InputAction::Escape, '\0'}, entries).effect, RecorderAppEffect::None);
+
+    model.handle({InputAction::Tab, '\0'}, entries);
+    model.handle({InputAction::None, 'd'}, entries);
+    CHECK_EQ(model.handle({InputAction::Back, '\0'}, entries).effect, RecorderAppEffect::None);
+    CHECK_EQ(model.page(), RecorderPage::DeleteConfirm);
+    CHECK_EQ(model.handle({InputAction::Erase, '\0'}, entries).effect, RecorderAppEffect::None);
+    CHECK_EQ(model.handle({InputAction::Erase, '\0'}, entries).effect, RecorderAppEffect::GoHome);
+    CHECK_EQ(model.exit(), RecorderAppEffect::Cleanup);
+}
+
 TEST_CASE(media_app_maps_library_playback_volume_rescan_and_home) {
     MediaAppModel model;
     MediaAppInputState fileState{true, true, false, false};
@@ -2715,6 +2858,12 @@ int main() {
     recorder_wav_parser_rejects_malformed_and_unsupported_headers();
     recorder_timestamp_candidates_require_a_real_calendar_time_and_capacity();
     recorder_sequential_candidates_are_fixed_and_bounded();
+    recorder_library_keeps_only_direct_wav_children_and_leaf_names();
+    recorder_library_sorts_newest_first_and_retains_deterministic_cap();
+    recorder_library_selection_wraps_and_stays_bounded_after_sort_and_clear();
+    recorder_app_model_switches_pages_only_while_audio_is_idle();
+    recorder_app_model_emits_record_play_selection_and_delete_effects();
+    recorder_app_model_keeps_character_commands_distinct_and_cleans_up_on_exit();
     media_app_maps_library_playback_volume_rescan_and_home();
     media_volume_request_is_explicit_and_consumed_once();
     motion_app_navigates_three_pages_and_wraps();

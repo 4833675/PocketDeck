@@ -11,6 +11,7 @@ constexpr uint32_t kRecorderByteRate = 32000;
 constexpr uint32_t kRecorderMaximumDataBytes = 0xFFFFFFFFu - 36u;
 constexpr std::size_t kTimestampPathBytes = 36;
 constexpr std::size_t kSequentialPathBytes = 25;
+constexpr char kRecordingsDirectory[] = "/Recordings/";
 
 void writeLe16(uint8_t* output, uint16_t value) {
     output[0] = static_cast<uint8_t>(value & 0xFFu);
@@ -63,6 +64,15 @@ bool formatPath(char* output, std::size_t capacity, std::size_t requiredBytes,
     const int written = std::snprintf(output, capacity, format, first, second, third, fourth,
                                       fifth, sixth);
     return written >= 0 && static_cast<std::size_t>(written) + 1 == requiredBytes;
+}
+
+char asciiLower(char value) {
+    if (value >= 'A' && value <= 'Z') return static_cast<char>(value - 'A' + 'a');
+    return value;
+}
+
+bool entryIsNewer(const RecordingEntry& lhs, const RecordingEntry& rhs) {
+    return std::strcmp(lhs.path.data(), rhs.path.data()) > 0;
 }
 
 }  // namespace
@@ -133,6 +143,97 @@ bool recorderSequentialPath(uint32_t index, char* output, std::size_t capacity) 
     if (index > 9999) return false;
     return formatPath(output, capacity, kSequentialPathBytes, "/Recordings/REC_%04u.WAV",
                       index, 0, 0, 0, 0, 0);
+}
+
+bool recorderPathIsWav(const char* path) {
+    if (path == nullptr || std::strncmp(path, kRecordingsDirectory,
+                                        sizeof(kRecordingsDirectory) - 1) != 0) {
+        return false;
+    }
+
+    const char* leaf = path + sizeof(kRecordingsDirectory) - 1;
+    if (*leaf == '\0') return false;
+    for (const char* cursor = leaf; *cursor != '\0'; ++cursor) {
+        if (*cursor == '/') return false;
+    }
+
+    const std::size_t leafLength = std::strlen(leaf);
+    return leafLength > 4 && leaf[leafLength - 4] == '.' &&
+           asciiLower(leaf[leafLength - 3]) == 'w' &&
+           asciiLower(leaf[leafLength - 2]) == 'a' &&
+           asciiLower(leaf[leafLength - 1]) == 'v';
+}
+
+const char* recordingEntryName(const RecordingEntry& entry) {
+    const char* name = entry.path.data();
+    for (const char* cursor = name; *cursor != '\0'; ++cursor) {
+        if (*cursor == '/' && cursor[1] != '\0') name = cursor + 1;
+    }
+    return name;
+}
+
+void RecordingLibrary::clear() {
+    for (auto& entry : entries_) entry = RecordingEntry{};
+    size_ = 0;
+    selected_ = 0;
+    truncated_ = false;
+}
+
+bool RecordingLibrary::add(const char* path, uint32_t bytes,
+                           RecordingCompatibility compatibility) {
+    if (!recorderPathIsWav(path)) return false;
+    const std::size_t length = std::strlen(path);
+    if (length == 0 || length >= kRecorderPathCapacity) return false;
+
+    RecordingEntry candidate;
+    std::memcpy(candidate.path.data(), path, length + 1);
+    candidate.bytes = bytes;
+    candidate.compatibility = compatibility;
+
+    if (size_ < entries_.size()) {
+        entries_[size_++] = candidate;
+        return true;
+    }
+
+    truncated_ = true;
+    std::size_t oldest = 0;
+    for (std::size_t index = 1; index < size_; ++index) {
+        if (entryIsNewer(entries_[oldest], entries_[index])) oldest = index;
+    }
+    if (!entryIsNewer(candidate, entries_[oldest])) return false;
+    entries_[oldest] = candidate;
+    return true;
+}
+
+void RecordingLibrary::sort() {
+    for (std::size_t index = 1; index < size_; ++index) {
+        RecordingEntry value = entries_[index];
+        std::size_t insertion = index;
+        while (insertion > 0 && entryIsNewer(value, entries_[insertion - 1])) {
+            entries_[insertion] = entries_[insertion - 1];
+            --insertion;
+        }
+        entries_[insertion] = value;
+    }
+    selected_ = 0;
+}
+
+const RecordingEntry& RecordingLibrary::at(std::size_t index) const {
+    static const RecordingEntry emptyEntry{};
+    return index < size_ ? entries_[index] : emptyEntry;
+}
+
+void RecordingLibrary::moveSelection(int direction) {
+    if (size_ == 0 || direction == 0) return;
+    if (direction < 0) {
+        selected_ = (selected_ + size_ - 1) % size_;
+    } else {
+        selected_ = (selected_ + 1) % size_;
+    }
+}
+
+void RecordingLibrary::select(std::size_t index) {
+    if (index < size_) selected_ = index;
 }
 
 }  // namespace pd
