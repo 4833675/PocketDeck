@@ -7,6 +7,7 @@
 #include <FS.h>
 
 #include "core/recorder_data.h"
+#include "services/recorder_restoration_volume.h"
 
 namespace pd {
 
@@ -67,6 +68,9 @@ struct RecorderSnapshot {
 
 class RecorderService {
 public:
+    void setRestorationVolume(uint8_t volumePercent) {
+        restorationVolume_.set(volumePercent);
+    }
     bool scan(bool storageMounted);
     void update(uint32_t nowMs);
     void moveSelection(int direction);
@@ -156,7 +160,7 @@ private:
     uint32_t completedPcmBytes_ = 0;
     uint32_t completedDurationMs_ = 0;
     uint32_t nextCheckpointBytes_ = kCheckpointBytes;
-    uint8_t persistedVolumePercent_ = 0;
+    RecorderRestorationVolume restorationVolume_{};
     bool activeStorageMounted_ = false;
 
     File recordingFile_{};

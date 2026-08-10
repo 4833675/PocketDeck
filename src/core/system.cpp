@@ -100,6 +100,7 @@ void System::begin() {
     } else if (!loaded.found) {
         diagnostics_.log("Settings defaults loaded");
     }
+    recorder_.setRestorationVolume(settings_.volume);
 
     const bool detected = board_.begin();
     diagnostics_.logf("Board init: Cardputer ADV=%d", detected ? 1 : 0);
@@ -359,11 +360,13 @@ void System::handleQuickSettingsResult(const QuickSettingsResult& result) {
     if (result.valuesChanged) {
         const QuickSettingsValues values = quickSettings_.values();
         const bool bleChanged = settings_.bleEnabled != values.bleEnabled;
+        const bool volumeChanged = settings_.volume != values.volume;
         settings_.brightness = values.brightness;
         settings_.volume = values.volume;
         settings_.bleEnabled = values.bleEnabled;
         board_.setBrightness(settings_.brightness);
         board_.setVolume(settings_.volume);
+        if (volumeChanged) recorder_.setRestorationVolume(settings_.volume);
         if (bleChanged) {
             bleKeyboard_.setEnabled(settings_.bleEnabled);
             applyResourceProfile(current_ != nullptr ? current_->id() : AppId::Launcher);
@@ -461,6 +464,7 @@ void System::handleSystemCommand(SystemCommand command) {
                 settings_.volume = static_cast<uint8_t>(adjusted);
                 context_.volumePercent = settings_.volume;
                 board_.setVolume(settings_.volume);
+                recorder_.setRestorationVolume(settings_.volume);
                 diagnostics_.logf("Volume changed: %u",
                                   static_cast<unsigned>(settings_.volume));
                 saveSettings();

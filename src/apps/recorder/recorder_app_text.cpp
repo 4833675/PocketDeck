@@ -1,5 +1,7 @@
 #include "apps/recorder/recorder_app_text.h"
 
+#include <cstdio>
+
 namespace pd {
 
 const char* localizedRecorderStateLabel(uint8_t state, UiLanguage language) {
@@ -92,6 +94,36 @@ const char* localizedRecorderLauncherTitle(UiLanguage language) {
 
 const char* localizedRecorderLauncherSubtitle(UiLanguage language) {
     return localized(language, "TF card WAV recorder", "TF 卡 WAV 录音机");
+}
+
+const char* localizedRecorderHintLabel(RecorderHintContext context,
+                                       UiLanguage language) {
+    switch (context) {
+        case RecorderHintContext::RecordIdle:
+            return localized(language, "ENTER REC   TAB FILES",
+                             "ENTER 录音   TAB 文件");
+        case RecorderHintContext::Recording:
+        case RecorderHintContext::Playing:
+            return localized(language, "ENTER STOP", "ENTER 停止");
+        case RecorderHintContext::FilesIdle:
+            return localized(language, "ENTER PLAY   d DELETE   TAB REC",
+                             "ENTER 播放   d 删除   TAB 录音");
+    }
+    return "";
+}
+
+bool formatRecorderElapsed(uint32_t elapsedMs, char* output,
+                           std::size_t capacity) {
+    if (output == nullptr || capacity == 0) return false;
+    const uint32_t totalSeconds = elapsedMs / 1000u;
+    const uint32_t hours = totalSeconds / 3600u;
+    const uint32_t minutes = (totalSeconds / 60u) % 60u;
+    const uint32_t seconds = totalSeconds % 60u;
+    const int written = std::snprintf(output, capacity, "%lu:%02lu:%02lu",
+                                      static_cast<unsigned long>(hours),
+                                      static_cast<unsigned long>(minutes),
+                                      static_cast<unsigned long>(seconds));
+    return written >= 0 && static_cast<std::size_t>(written) < capacity;
 }
 
 }  // namespace pd

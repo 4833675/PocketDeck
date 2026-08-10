@@ -154,14 +154,14 @@ bool RecorderService::startRecording(bool storageMounted, int64_t utcEpochSecond
                                      uint32_t nowMs,
                                      uint8_t persistedVolumePercent) {
     if (state_ == RecorderState::Recording || recordingFile_) return false;
-    persistedVolumePercent_ = persistedVolumePercent;
+    setRestorationVolume(persistedVolumePercent);
     activeStorageMounted_ = storageMounted;
 
     if (state_ == RecorderState::Playing || playbackFile_) {
         // A failed NoCard transition must still return the shared audio path to
         // the persisted Speaker state. A normal capture transition leaves it
         // stopped because stopSpeakerForCapture() follows immediately.
-        if (!stopPlaybackInternal(persistedVolumePercent_, !storageMounted)) {
+        if (!stopPlaybackInternal(restorationVolume_.percent(), !storageMounted)) {
             setError(RecorderError::SpeakerStartFailed);
             return false;
         }
@@ -177,7 +177,7 @@ bool RecorderService::startRecording(bool storageMounted, int64_t utcEpochSecond
     M5Cardputer.Mic.end();
     if (!M5Cardputer.Mic.begin() || !M5Cardputer.Mic.isRunning()) {
         M5Cardputer.Mic.end();
-        restoreSpeaker(persistedVolumePercent_);
+        restoreSpeaker(restorationVolume_.percent());
         setError(RecorderError::MicStartFailed);
         return false;
     }
@@ -185,7 +185,7 @@ bool RecorderService::startRecording(bool storageMounted, int64_t utcEpochSecond
     refreshFreeBytes(true);
     if (!ensureRecordingsDirectory()) {
         M5Cardputer.Mic.end();
-        restoreSpeaker(persistedVolumePercent_);
+        restoreSpeaker(restorationVolume_.percent());
         setError(RecorderError::DirectoryCreateFailed);
         return false;
     }
@@ -193,13 +193,13 @@ bool RecorderService::startRecording(bool storageMounted, int64_t utcEpochSecond
     recordingFreeBudget_ = freeBytes_;
     if (!chooseRecordingPath(utcEpochSeconds)) {
         M5Cardputer.Mic.end();
-        restoreSpeaker(persistedVolumePercent_);
+        restoreSpeaker(restorationVolume_.percent());
         setError(RecorderError::NoFilenameAvailable);
         return false;
     }
     if (recordingFreeBudget_ < kRecorderWavHeaderBytes) {
         M5Cardputer.Mic.end();
-        restoreSpeaker(persistedVolumePercent_);
+        restoreSpeaker(restorationVolume_.percent());
         setError(RecorderError::StorageFull);
         return false;
     }
@@ -207,7 +207,7 @@ bool RecorderService::startRecording(bool storageMounted, int64_t utcEpochSecond
     recordingFile_ = SD.open(recordingPath_.data(), FILE_WRITE);
     if (!recordingFile_) {
         M5Cardputer.Mic.end();
-        restoreSpeaker(persistedVolumePercent_);
+        restoreSpeaker(restorationVolume_.percent());
         setError(RecorderError::FileOpenFailed);
         return false;
     }
@@ -223,7 +223,7 @@ bool RecorderService::startRecording(bool storageMounted, int64_t utcEpochSecond
         SD.remove(recordingPath_.data());
         recordingPath_.fill('\0');
         M5Cardputer.Mic.end();
-        restoreSpeaker(persistedVolumePercent_);
+        restoreSpeaker(restorationVolume_.percent());
         setError(RecorderError::PlaceholderWriteFailed);
         return false;
     }
@@ -248,7 +248,7 @@ bool RecorderService::startRecording(bool storageMounted, int64_t utcEpochSecond
     // A second immediate call can wait forever if the Mic task never wakes, so
     // initial capture queues only A and waits for observed activity.
     if (!primeCapture(nowMs)) {
-        return finishRecording(storageMounted, nowMs, persistedVolumePercent_, false,
+        return finishRecording(storageMounted, nowMs, restorationVolume_.percent(), false,
                                RecorderError::MicQueueFailed);
     }
     return true;
@@ -257,8 +257,8 @@ bool RecorderService::startRecording(bool storageMounted, int64_t utcEpochSecond
 bool RecorderService::stopRecording(bool storageMounted, uint32_t nowMs,
                                     uint8_t persistedVolumePercent) {
     if (state_ != RecorderState::Recording || !recordingFile_) return false;
-    persistedVolumePercent_ = persistedVolumePercent;
-    return finishRecording(storageMounted, nowMs, persistedVolumePercent_, true,
+    setRestorationVolume(persistedVolumePercent);
+    return finishRecording(storageMounted, nowMs, restorationVolume_.percent(), true,
                            RecorderError::None);
 }
 
@@ -267,7 +267,7 @@ void RecorderService::update(uint32_t nowMs) {
         if (!processCapture(nowMs, true)) {
             const RecorderError terminal =
                 error_ == RecorderError::None ? RecorderError::MicQueueFailed : error_;
-            finishRecording(activeStorageMounted_, nowMs, persistedVolumePercent_, false,
+            finishRecording(activeStorageMounted_, nowMs, restorationVolume_.percent(), false,
                             terminal);
         }
         return;
@@ -632,7 +632,7 @@ bool RecorderService::startSelectedPlayback(bool storageMounted, uint32_t nowMs,
         recordingFile_ || playbackFile_) {
         return false;
     }
-    persistedVolumePercent_ = persistedVolumePercent;
+    setRestorationVolume(persistedVolumePercent);
     activeStorageMounted_ = storageMounted;
     if (!storageMounted) {
         state_ = RecorderState::NoCard;
@@ -684,7 +684,7 @@ bool RecorderService::startSelectedPlayback(bool storageMounted, uint32_t nowMs,
     M5Cardputer.Speaker.stop(kPlaybackChannel);
     M5Cardputer.Speaker.end();
     resetPlaybackQueue();
-    if (!restoreSpeaker(persistedVolumePercent_)) {
+    if (!restoreSpeaker(restorationVolume_.percent())) {
         playbackFile_.close();
         setError(RecorderError::SpeakerStartFailed);
         return false;
@@ -702,14 +702,14 @@ bool RecorderService::startSelectedPlayback(bool storageMounted, uint32_t nowMs,
 bool RecorderService::updatePlayback(uint32_t nowMs) {
     if (state_ != RecorderState::Playing || !playbackFile_ ||
         !M5Cardputer.Speaker.isRunning()) {
-        stopPlaybackInternal(persistedVolumePercent_, true);
+        stopPlaybackInternal(restorationVolume_.percent(), true);
         setError(RecorderError::SpeakerStartFailed);
         return false;
     }
 
     const std::size_t hardwareDepth = M5Cardputer.Speaker.isPlaying(kPlaybackChannel);
     if (hardwareDepth > playbackQueued_ || hardwareDepth > 2) {
-        stopPlaybackInternal(persistedVolumePercent_, true);
+        stopPlaybackInternal(restorationVolume_.percent(), true);
         setError(RecorderError::SpeakerQueueFailed);
         return false;
     }
@@ -721,7 +721,7 @@ bool RecorderService::updatePlayback(uint32_t nowMs) {
         }
         if (!primePlayback()) {
             const RecorderError terminal = error_;
-            stopPlaybackInternal(persistedVolumePercent_, true);
+            stopPlaybackInternal(restorationVolume_.percent(), true);
             setError(terminal);
             return false;
         }
@@ -757,7 +757,7 @@ bool RecorderService::updatePlayback(uint32_t nowMs) {
                 playbackWakingBuffer_ = kInvalidBufferIndex;
             } else {
                 if (!deadlineReached(nowMs, playbackWakeDeadlineMs_)) return true;
-                stopPlaybackInternal(persistedVolumePercent_, true);
+                stopPlaybackInternal(restorationVolume_.percent(), true);
                 setError(RecorderError::SpeakerWakeTimeout);
                 return false;
             }
@@ -782,7 +782,7 @@ bool RecorderService::updatePlayback(uint32_t nowMs) {
             // must pass the bounded Waking handshake again before queue growth.
             if (!primePlayback()) {
                 const RecorderError terminal = error_;
-                stopPlaybackInternal(persistedVolumePercent_, true);
+                stopPlaybackInternal(restorationVolume_.percent(), true);
                 setError(terminal);
                 return false;
             }
@@ -794,7 +794,7 @@ bool RecorderService::updatePlayback(uint32_t nowMs) {
            playbackRemainingBytes_ > 0) {
         if (!queueNextPlaybackChunk()) {
             const RecorderError terminal = error_;
-            stopPlaybackInternal(persistedVolumePercent_, true);
+            stopPlaybackInternal(restorationVolume_.percent(), true);
             setError(terminal);
             return false;
         }
@@ -932,8 +932,8 @@ int16_t* RecorderService::playbackData(uint8_t bufferIndex) {
 
 bool RecorderService::stopPlayback(uint8_t persistedVolumePercent) {
     if (state_ != RecorderState::Playing && !playbackFile_) return false;
-    persistedVolumePercent_ = persistedVolumePercent;
-    const bool restored = stopPlaybackInternal(persistedVolumePercent_, true);
+    setRestorationVolume(persistedVolumePercent);
+    const bool restored = stopPlaybackInternal(restorationVolume_.percent(), true);
     refreshFreeBytes(activeStorageMounted_);
     if (restored) {
         setIdleState();
@@ -1009,15 +1009,15 @@ bool RecorderService::deleteSelected(bool storageMounted) {
 
 void RecorderService::cleanupOnExit(bool storageMounted, uint32_t nowMs,
                                     uint8_t persistedVolumePercent) {
-    persistedVolumePercent_ = persistedVolumePercent;
+    setRestorationVolume(persistedVolumePercent);
     if (state_ == RecorderState::Recording || recordingFile_) {
-        finishRecording(storageMounted, nowMs, persistedVolumePercent_, true,
+        finishRecording(storageMounted, nowMs, restorationVolume_.percent(), true,
                         RecorderError::None);
         return;
     }
 
     M5Cardputer.Mic.end();
-    stopPlaybackInternal(persistedVolumePercent_, true);
+    stopPlaybackInternal(restorationVolume_.percent(), true);
     if (storageMounted) {
         setIdleState();
     } else {

@@ -54,6 +54,7 @@
 #include "core/wifi_profiles.h"
 #include "core/wifi_recovery_policy.h"
 #include "services/diagnostics_service.h"
+#include "services/recorder_restoration_volume.h"
 #include "ui/quick_settings_model.h"
 #include "ui/theme.h"
 
@@ -666,6 +667,47 @@ TEST_CASE(recorder_localized_text_covers_visible_states_errors_and_launcher_labe
     CHECK_STR_EQ(localizedRecorderErrorLabel(22,
                                              UiLanguage::SimplifiedChinese),
                  "删除失败");
+}
+
+TEST_CASE(recorder_elapsed_text_does_not_wrap_after_99_hours) {
+    char elapsed[16]{};
+    CHECK(formatRecorderElapsed(359999000u, elapsed, sizeof(elapsed)));
+    CHECK_STR_EQ(elapsed, "99:59:59");
+    CHECK(formatRecorderElapsed(360000000u, elapsed, sizeof(elapsed)));
+    CHECK_STR_EQ(elapsed, "100:00:00");
+
+    char tooSmall[9]{};
+    CHECK(!formatRecorderElapsed(360000000u, tooSmall, sizeof(tooSmall)));
+}
+
+TEST_CASE(recorder_hints_only_advertise_controls_available_in_each_audio_state) {
+    CHECK_STR_EQ(localizedRecorderHintLabel(RecorderHintContext::RecordIdle,
+                                            UiLanguage::English),
+                 "ENTER REC   TAB FILES");
+    CHECK_STR_EQ(localizedRecorderHintLabel(RecorderHintContext::Recording,
+                                            UiLanguage::English),
+                 "ENTER STOP");
+    CHECK_STR_EQ(localizedRecorderHintLabel(RecorderHintContext::Recording,
+                                            UiLanguage::SimplifiedChinese),
+                 "ENTER 停止");
+    CHECK_STR_EQ(localizedRecorderHintLabel(RecorderHintContext::FilesIdle,
+                                            UiLanguage::English),
+                 "ENTER PLAY   d DELETE   TAB REC");
+    CHECK_STR_EQ(localizedRecorderHintLabel(RecorderHintContext::Playing,
+                                            UiLanguage::English),
+                 "ENTER STOP");
+    CHECK_STR_EQ(localizedRecorderHintLabel(RecorderHintContext::Playing,
+                                            UiLanguage::SimplifiedChinese),
+                 "ENTER 停止");
+}
+
+TEST_CASE(recorder_restoration_volume_always_uses_the_latest_system_setting) {
+    RecorderRestorationVolume volume;
+    CHECK_EQ(volume.percent(), 0u);
+    volume.set(25);
+    CHECK_EQ(volume.percent(), 25u);
+    volume.set(80);
+    CHECK_EQ(volume.percent(), 80u);
 }
 
 TEST_CASE(wifi_and_weather_labels_cover_visible_states) {
@@ -2902,6 +2944,9 @@ int main() {
     launcher_starts_on_keyboard_and_wraps();
     launcher_confirm_requests_selected_app();
     recorder_localized_text_covers_visible_states_errors_and_launcher_labels();
+    recorder_elapsed_text_does_not_wrap_after_99_hours();
+    recorder_hints_only_advertise_controls_available_in_each_audio_state();
+    recorder_restoration_volume_always_uses_the_latest_system_setting();
     wifi_and_weather_labels_cover_visible_states();
     weather_localized_text_covers_conditions_states_and_errors();
     keyboard_localized_text_covers_every_state_and_error();

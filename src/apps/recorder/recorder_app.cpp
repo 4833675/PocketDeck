@@ -77,21 +77,13 @@ const char* recorderDiagnosticError(RecorderError error) {
     return "unknown";
 }
 
-void drawHint(M5Canvas& canvas, UiLanguage language, const char* english,
-              const char* chinese) {
+void drawHint(M5Canvas& canvas, UiLanguage language, const char* text) {
     canvas.fillRect(0, kHintY, config::kScreenWidth, theme::kHintHeight, theme::kPanel);
     setUiFont(canvas, language);
     canvas.setTextDatum(middle_center);
     canvas.setTextColor(theme::kMuted, theme::kPanel);
-    canvas.drawString(localized(language, english, chinese), config::kScreenWidth / 2,
+    canvas.drawString(text, config::kScreenWidth / 2,
                       kHintY + theme::kHintHeight / 2);
-}
-
-void formatElapsed(uint32_t elapsedMs, char* output, std::size_t capacity) {
-    const uint32_t seconds = elapsedMs / 1000u;
-    std::snprintf(output, capacity, "%02lu:%02lu",
-                  static_cast<unsigned long>((seconds / 60u) % 100u),
-                  static_cast<unsigned long>(seconds % 60u));
 }
 
 void formatBytes(uint64_t bytes, char* output, std::size_t capacity) {
@@ -165,10 +157,12 @@ void drawRecordPage(M5Canvas& canvas, const RecorderSnapshot& snapshot,
                         recording ? theme::kError : theme::kPrimary);
     }
 
-    char elapsed[8]{};
+    char elapsed[16]{};
     char pcm[20]{};
     char freeBytes[20]{};
-    formatElapsed(snapshot.elapsedMs, elapsed, sizeof(elapsed));
+    if (!formatRecorderElapsed(snapshot.elapsedMs, elapsed, sizeof(elapsed))) {
+        std::snprintf(elapsed, sizeof(elapsed), "--:--:--");
+    }
     formatBytes(snapshot.pcmBytes, pcm, sizeof(pcm));
     formatBytes(snapshot.freeBytes, freeBytes, sizeof(freeBytes));
     setTechnicalFont(canvas);
@@ -181,8 +175,10 @@ void drawRecordPage(M5Canvas& canvas, const RecorderSnapshot& snapshot,
     std::snprintf(freeLine, sizeof(freeLine), "TF %s", freeBytes);
     canvas.drawString(freeLine, 6, 89);
 
-    drawHint(canvas, language, recording ? "ENTER STOP   TAB FILES" : "ENTER REC   TAB FILES",
-             recording ? "ENTER 停止   TAB 文件" : "ENTER 录音   TAB 文件");
+    drawHint(canvas, language,
+             localizedRecorderHintLabel(recording ? RecorderHintContext::Recording
+                                                   : RecorderHintContext::RecordIdle,
+                                          language));
 }
 
 void drawFilesPage(M5Canvas& canvas, const RecorderSnapshot& snapshot,
@@ -233,8 +229,11 @@ void drawFilesPage(M5Canvas& canvas, const RecorderSnapshot& snapshot,
                              : theme::kMuted,
                         theme::kBackground);
     canvas.drawString(state, 6, 98);
-    drawHint(canvas, language, "ENTER PLAY/STOP  d DELETE  TAB REC",
-             "ENTER 播放/停止  d 删除  TAB 录音");
+    drawHint(canvas, language,
+             localizedRecorderHintLabel(snapshot.state == RecorderState::Playing
+                                             ? RecorderHintContext::Playing
+                                             : RecorderHintContext::FilesIdle,
+                                         language));
 }
 
 void drawDeleteConfirm(M5Canvas& canvas, const RecordingLibrary& library,
@@ -255,7 +254,7 @@ void drawDeleteConfirm(M5Canvas& canvas, const RecordingLibrary& library,
     canvas.setTextColor(theme::kMuted, theme::kPanelRaised);
     canvas.drawString(localized(language, "ENTER DELETE", "ENTER 删除"),
                       config::kScreenWidth / 2, 78);
-    drawHint(canvas, language, "BKSP CANCEL", "BKSP 取消");
+    drawHint(canvas, language, localized(language, "BKSP CANCEL", "BKSP 取消"));
 }
 
 }  // namespace
