@@ -69,7 +69,7 @@ bool formatPath(char* output, std::size_t capacity, std::size_t requiredBytes,
 
 bool recorderBuildWavHeader(uint8_t* output, std::size_t capacity, uint32_t dataBytes) {
     if (output == nullptr || capacity < kRecorderWavHeaderBytes ||
-        dataBytes > kRecorderMaximumDataBytes) {
+        dataBytes > kRecorderMaximumDataBytes || dataBytes % 2u != 0u) {
         return false;
     }
 

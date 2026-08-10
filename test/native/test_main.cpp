@@ -2200,13 +2200,13 @@ TEST_CASE(recorder_wav_builder_writes_the_canonical_44_byte_header) {
         0x80, 0x3E, 0x00, 0x00, 0x00, 0x7D, 0x00, 0x00, 0x02, 0x00, 0x10, 0x00,
         'd', 'a', 't', 'a', 0x00, 0xFA, 0x00, 0x00,
     }};
-    // 12,345 bytes: RIFF size at offsets 4..7 is 12,381 (0x305D), data size at
-    // offsets 40..43 is 12,345 (0x3039), both little-endian.
+    // 12,346 bytes: RIFF size at offsets 4..7 is 12,382 (0x305E), data size at
+    // offsets 40..43 is 12,346 (0x303A), both little-endian.
     constexpr std::array<uint8_t, kRecorderWavHeaderBytes> finalBytes{{
-        'R', 'I', 'F', 'F', 0x5D, 0x30, 0x00, 0x00, 'W', 'A', 'V', 'E',
+        'R', 'I', 'F', 'F', 0x5E, 0x30, 0x00, 0x00, 'W', 'A', 'V', 'E',
         'f', 'm', 't', ' ', 0x10, 0x00, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00,
         0x80, 0x3E, 0x00, 0x00, 0x00, 0x7D, 0x00, 0x00, 0x02, 0x00, 0x10, 0x00,
-        'd', 'a', 't', 'a', 0x39, 0x30, 0x00, 0x00,
+        'd', 'a', 't', 'a', 0x3A, 0x30, 0x00, 0x00,
     }};
 
     std::array<uint8_t, kRecorderWavHeaderBytes> actual{};
@@ -2214,26 +2214,28 @@ TEST_CASE(recorder_wav_builder_writes_the_canonical_44_byte_header) {
     CHECK_EQ(std::memcmp(actual.data(), zeroBytes.data(), actual.size()), 0);
     CHECK(recorderBuildWavHeader(actual.data(), actual.size(), 64000));
     CHECK_EQ(std::memcmp(actual.data(), checkpointBytes.data(), actual.size()), 0);
-    CHECK(recorderBuildWavHeader(actual.data(), actual.size(), 12345));
+    CHECK(recorderBuildWavHeader(actual.data(), actual.size(), 12346));
     CHECK_EQ(std::memcmp(actual.data(), finalBytes.data(), actual.size()), 0);
     CHECK(!recorderBuildWavHeader(nullptr, actual.size(), 0));
     CHECK(!recorderBuildWavHeader(actual.data(), actual.size() - 1, 0));
 }
 
-TEST_CASE(recorder_wav_builder_rejects_riff_size_overflow) {
-    constexpr uint32_t maximumDataBytes = 0xFFFFFFFFu - 36u;
+TEST_CASE(recorder_wav_builder_rejects_unaligned_and_overflow_payloads) {
+    constexpr uint32_t maximumDataBytes = 0xFFFFFFDAu;
     std::array<uint8_t, kRecorderWavHeaderBytes> header{};
 
     CHECK(recorderBuildWavHeader(header.data(), header.size(), maximumDataBytes));
-    CHECK_EQ(header[4], 0xFFu);
+    CHECK_EQ(header[4], 0xFEu);
     CHECK_EQ(header[5], 0xFFu);
     CHECK_EQ(header[6], 0xFFu);
     CHECK_EQ(header[7], 0xFFu);
-    CHECK_EQ(header[40], 0xDBu);
+    CHECK_EQ(header[40], 0xDAu);
     CHECK_EQ(header[41], 0xFFu);
     CHECK_EQ(header[42], 0xFFu);
     CHECK_EQ(header[43], 0xFFu);
+    CHECK(!recorderBuildWavHeader(header.data(), header.size(), 1u));
     CHECK(!recorderBuildWavHeader(header.data(), header.size(), maximumDataBytes + 1u));
+    CHECK(!recorderBuildWavHeader(header.data(), header.size(), maximumDataBytes + 2u));
 }
 
 TEST_CASE(recorder_wav_parser_returns_fixed_metadata_for_canonical_data) {
@@ -2707,7 +2709,7 @@ int main() {
     media_library_is_bounded_and_selection_wraps();
     media_progress_and_elapsed_clock_are_bounded_and_wrap_safe();
     recorder_wav_builder_writes_the_canonical_44_byte_header();
-    recorder_wav_builder_rejects_riff_size_overflow();
+    recorder_wav_builder_rejects_unaligned_and_overflow_payloads();
     recorder_wav_parser_returns_fixed_metadata_for_canonical_data();
     recorder_wav_parser_rejects_partial_pcm_frames();
     recorder_wav_parser_rejects_malformed_and_unsupported_headers();
