@@ -1,6 +1,7 @@
 #include "test_harness.h"
 
 #include <array>
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <utility>
@@ -26,6 +27,7 @@
 #include "core/lora_data.h"
 #include "core/lora_tx_policy.h"
 #include "core/media_data.h"
+#include "core/motion_data.h"
 #include "core/input_router.h"
 #include "core/mac_keymap.h"
 #include "core/resource_policy.h"
@@ -2056,6 +2058,105 @@ TEST_CASE(media_volume_request_is_explicit_and_consumed_once) {
     CHECK(!context.takeVolumeDelta(delta));
 }
 
+TEST_CASE(motion_level_uses_roll_pitch_formula_and_alpha_filter) {
+    MotionClassifier classifier;
+    classifier.update(MotionSample{0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f}, 0);
+    CHECK(std::fabs(classifier.level().rollDegrees - 90.0f) < 0.01f);
+    CHECK(std::fabs(classifier.level().pitchDegrees - 0.0f) < 0.01f);
+
+    classifier.update(MotionSample{1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f}, 1);
+    CHECK(std::fabs(classifier.level().rollDegrees - 72.0f) < 0.01f);
+    CHECK(std::fabs(classifier.level().pitchDegrees + 18.0f) < 0.01f);
+}
+
+TEST_CASE(motion_exposes_acceleration_and_gyro_magnitudes) {
+    MotionClassifier classifier;
+    classifier.update(MotionSample{0.0f, 0.0f, 1.3f, 3.0f, 4.0f, 12.0f}, 0);
+    CHECK(std::fabs(classifier.accelerationMagnitude() - 1.3f) < 0.01f);
+    CHECK(std::fabs(classifier.accelerationDeviation() - 0.3f) < 0.01f);
+    CHECK(std::fabs(classifier.gyroMagnitude() - 13.0f) < 0.01f);
+}
+
+TEST_CASE(motion_still_thresholds_are_strict) {
+    MotionClassifier belowAccelThreshold;
+    for (uint32_t now = 0; now < 5; ++now) {
+        belowAccelThreshold.update(MotionSample{0.0f, 0.0f, 1.079f, 0.0f, 0.0f, 0.0f}, now);
+    }
+    CHECK_EQ(belowAccelThreshold.activity(), MotionActivity::Still);
+
+    MotionClassifier accelBoundary;
+    for (uint32_t now = 0; now < 5; ++now) {
+        accelBoundary.update(MotionSample{0.0f, 0.0f, 1.08f, 0.0f, 0.0f, 0.0f}, now);
+    }
+    CHECK_EQ(accelBoundary.activity(), MotionActivity::Moving);
+
+    MotionClassifier gyroBoundary;
+    for (uint32_t now = 0; now < 5; ++now) {
+        gyroBoundary.update(MotionSample{0.0f, 0.0f, 1.0f, 10.0f, 0.0f, 0.0f}, now);
+    }
+    CHECK_EQ(gyroBoundary.activity(), MotionActivity::Moving);
+}
+
+TEST_CASE(motion_shake_thresholds_are_inclusive) {
+    MotionClassifier accelBoundary;
+    accelBoundary.update(MotionSample{0.0f, 0.0f, 1.45f, 0.0f, 0.0f, 0.0f}, 0);
+    CHECK_EQ(accelBoundary.activity(), MotionActivity::Shake);
+
+    MotionClassifier gyroBoundary;
+    gyroBoundary.update(MotionSample{0.0f, 0.0f, 1.0f, 180.0f, 0.0f, 0.0f}, 0);
+    CHECK_EQ(gyroBoundary.activity(), MotionActivity::Shake);
+}
+
+TEST_CASE(motion_requires_five_consecutive_non_shake_candidates) {
+    MotionClassifier classifier;
+    const MotionSample still{0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f};
+    const MotionSample moving{0.0f, 0.0f, 1.1f, 0.0f, 0.0f, 0.0f};
+
+    for (uint32_t now = 0; now < 4; ++now) classifier.update(still, now);
+    CHECK_EQ(classifier.activity(), MotionActivity::Moving);
+    classifier.update(still, 4);
+    CHECK_EQ(classifier.activity(), MotionActivity::Still);
+
+    for (uint32_t now = 5; now < 9; ++now) classifier.update(moving, now);
+    CHECK_EQ(classifier.activity(), MotionActivity::Still);
+    classifier.update(moving, 9);
+    CHECK_EQ(classifier.activity(), MotionActivity::Moving);
+}
+
+TEST_CASE(motion_shake_latch_is_wrap_safe_and_restarts_hysteresis_after_500_ms) {
+    MotionClassifier classifier;
+    const MotionSample shake{0.0f, 0.0f, 1.0f, 180.0f, 0.0f, 0.0f};
+    const MotionSample still{0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f};
+    constexpr uint32_t start = 0xFFFFFF00u;
+
+    classifier.update(shake, start);
+    CHECK_EQ(classifier.activity(), MotionActivity::Shake);
+    for (uint32_t elapsed = 496; elapsed < 500; ++elapsed) {
+        classifier.update(still, start + elapsed);
+    }
+    CHECK_EQ(classifier.activity(), MotionActivity::Shake);
+
+    for (uint32_t elapsed = 500; elapsed < 504; ++elapsed) {
+        classifier.update(still, start + elapsed);
+    }
+    CHECK_EQ(classifier.activity(), MotionActivity::Shake);
+    classifier.update(still, start + 504);
+    CHECK_EQ(classifier.activity(), MotionActivity::Still);
+}
+
+TEST_CASE(motion_peak_tracks_maximum_and_reset_uses_current_sample) {
+    MotionClassifier classifier;
+    classifier.update(MotionSample{0.0f, 0.0f, 1.6f, 0.0f, 0.0f, 0.0f}, 0);
+    classifier.update(MotionSample{0.0f, 0.0f, 1.1f, 0.0f, 0.0f, 0.0f}, 1);
+    CHECK(std::fabs(classifier.peakAccelerationDeviation() - 0.6f) < 0.01f);
+    classifier.resetPeak();
+    CHECK(std::fabs(classifier.peakAccelerationDeviation() - 0.1f) < 0.01f);
+
+    MotionClassifier emptyClassifier;
+    emptyClassifier.resetPeak();
+    CHECK_EQ(emptyClassifier.peakAccelerationDeviation(), 0.0f);
+}
+
 int main() {
     app_resource_profiles_isolate_foreground_workloads();
     weather_and_media_profiles_have_explicit_tradeoffs();
@@ -2169,5 +2270,12 @@ int main() {
     media_progress_and_elapsed_clock_are_bounded_and_wrap_safe();
     media_app_maps_library_playback_volume_rescan_and_home();
     media_volume_request_is_explicit_and_consumed_once();
+    motion_level_uses_roll_pitch_formula_and_alpha_filter();
+    motion_exposes_acceleration_and_gyro_magnitudes();
+    motion_still_thresholds_are_strict();
+    motion_shake_thresholds_are_inclusive();
+    motion_requires_five_consecutive_non_shake_candidates();
+    motion_shake_latch_is_wrap_safe_and_restarts_hysteresis_after_500_ms();
+    motion_peak_tracks_maximum_and_reset_uses_current_sample();
     return pd_test::finish();
 }
