@@ -30,6 +30,7 @@
 #include "core/lora_tx_policy.h"
 #include "core/media_data.h"
 #include "core/motion_data.h"
+#include "core/recorder_data.h"
 #include "core/input_router.h"
 #include "core/ir_data.h"
 #include "core/mac_keymap.h"
@@ -2186,6 +2187,157 @@ TEST_CASE(media_progress_and_elapsed_clock_are_bounded_and_wrap_safe) {
     CHECK_EQ(clock.elapsed(999), 0u);
 }
 
+TEST_CASE(recorder_wav_builder_writes_the_canonical_44_byte_header) {
+    constexpr std::array<uint8_t, kRecorderWavHeaderBytes> zeroBytes{{
+        'R', 'I', 'F', 'F', 0x24, 0x00, 0x00, 0x00, 'W', 'A', 'V', 'E',
+        'f', 'm', 't', ' ', 0x10, 0x00, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00,
+        0x80, 0x3E, 0x00, 0x00, 0x00, 0x7D, 0x00, 0x00, 0x02, 0x00, 0x10, 0x00,
+        'd', 'a', 't', 'a', 0x00, 0x00, 0x00, 0x00,
+    }};
+    constexpr std::array<uint8_t, kRecorderWavHeaderBytes> checkpointBytes{{
+        'R', 'I', 'F', 'F', 0x24, 0xFA, 0x00, 0x00, 'W', 'A', 'V', 'E',
+        'f', 'm', 't', ' ', 0x10, 0x00, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00,
+        0x80, 0x3E, 0x00, 0x00, 0x00, 0x7D, 0x00, 0x00, 0x02, 0x00, 0x10, 0x00,
+        'd', 'a', 't', 'a', 0x00, 0xFA, 0x00, 0x00,
+    }};
+    // 12,345 bytes: RIFF size at offsets 4..7 is 12,381 (0x305D), data size at
+    // offsets 40..43 is 12,345 (0x3039), both little-endian.
+    constexpr std::array<uint8_t, kRecorderWavHeaderBytes> finalBytes{{
+        'R', 'I', 'F', 'F', 0x5D, 0x30, 0x00, 0x00, 'W', 'A', 'V', 'E',
+        'f', 'm', 't', ' ', 0x10, 0x00, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00,
+        0x80, 0x3E, 0x00, 0x00, 0x00, 0x7D, 0x00, 0x00, 0x02, 0x00, 0x10, 0x00,
+        'd', 'a', 't', 'a', 0x39, 0x30, 0x00, 0x00,
+    }};
+
+    std::array<uint8_t, kRecorderWavHeaderBytes> actual{};
+    CHECK(recorderBuildWavHeader(actual.data(), actual.size(), 0));
+    CHECK_EQ(std::memcmp(actual.data(), zeroBytes.data(), actual.size()), 0);
+    CHECK(recorderBuildWavHeader(actual.data(), actual.size(), 64000));
+    CHECK_EQ(std::memcmp(actual.data(), checkpointBytes.data(), actual.size()), 0);
+    CHECK(recorderBuildWavHeader(actual.data(), actual.size(), 12345));
+    CHECK_EQ(std::memcmp(actual.data(), finalBytes.data(), actual.size()), 0);
+    CHECK(!recorderBuildWavHeader(nullptr, actual.size(), 0));
+    CHECK(!recorderBuildWavHeader(actual.data(), actual.size() - 1, 0));
+}
+
+TEST_CASE(recorder_wav_parser_returns_fixed_metadata_for_canonical_data) {
+    constexpr std::array<uint8_t, kRecorderWavHeaderBytes> header{{
+        'R', 'I', 'F', 'F', 0x24, 0xFA, 0x00, 0x00, 'W', 'A', 'V', 'E',
+        'f', 'm', 't', ' ', 0x10, 0x00, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00,
+        0x80, 0x3E, 0x00, 0x00, 0x00, 0x7D, 0x00, 0x00, 0x02, 0x00, 0x10, 0x00,
+        'd', 'a', 't', 'a', 0x00, 0xFA, 0x00, 0x00,
+    }};
+    RecorderWavMetadata metadata{};
+    CHECK_EQ(recorderParseWavHeader(header.data(), header.size(), 64044, &metadata),
+             RecorderWavParseResult::Valid);
+    CHECK_EQ(metadata.dataOffset, 44u);
+    CHECK_EQ(metadata.dataBytes, 64000u);
+    CHECK_EQ(recorderParseWavHeader(header.data(), header.size(), 64099, nullptr),
+             RecorderWavParseResult::Valid);
+}
+
+TEST_CASE(recorder_wav_parser_rejects_malformed_and_unsupported_headers) {
+    constexpr std::array<uint8_t, kRecorderWavHeaderBytes> validHeader{{
+        'R', 'I', 'F', 'F', 0x24, 0x00, 0x00, 0x00, 'W', 'A', 'V', 'E',
+        'f', 'm', 't', ' ', 0x10, 0x00, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00,
+        0x80, 0x3E, 0x00, 0x00, 0x00, 0x7D, 0x00, 0x00, 0x02, 0x00, 0x10, 0x00,
+        'd', 'a', 't', 'a', 0x00, 0x00, 0x00, 0x00,
+    }};
+    std::array<uint8_t, kRecorderWavHeaderBytes> mutated = validHeader;
+    CHECK_EQ(recorderParseWavHeader(nullptr, validHeader.size(), 44, nullptr),
+             RecorderWavParseResult::Malformed);
+    CHECK_EQ(recorderParseWavHeader(validHeader.data(), validHeader.size() - 1, 44, nullptr),
+             RecorderWavParseResult::Malformed);
+    mutated[0] = 'X';
+    CHECK_EQ(recorderParseWavHeader(mutated.data(), mutated.size(), 44, nullptr),
+             RecorderWavParseResult::Malformed);
+    mutated = validHeader;
+    mutated[8] = 'X';
+    CHECK_EQ(recorderParseWavHeader(mutated.data(), mutated.size(), 44, nullptr),
+             RecorderWavParseResult::Malformed);
+    mutated = validHeader;
+    mutated[12] = 'X';
+    CHECK_EQ(recorderParseWavHeader(mutated.data(), mutated.size(), 44, nullptr),
+             RecorderWavParseResult::Malformed);
+    mutated = validHeader;
+    mutated[16] = 0x12;
+    CHECK_EQ(recorderParseWavHeader(mutated.data(), mutated.size(), 44, nullptr),
+             RecorderWavParseResult::Malformed);
+    mutated = validHeader;
+    mutated[36] = 'X';
+    CHECK_EQ(recorderParseWavHeader(mutated.data(), mutated.size(), 44, nullptr),
+             RecorderWavParseResult::Malformed);
+    mutated = validHeader;
+    mutated[4] = 0x25;
+    CHECK_EQ(recorderParseWavHeader(mutated.data(), mutated.size(), 44, nullptr),
+             RecorderWavParseResult::Malformed);
+    mutated = validHeader;
+    mutated[40] = 0x01;
+    CHECK_EQ(recorderParseWavHeader(mutated.data(), mutated.size(), 45, nullptr),
+             RecorderWavParseResult::Malformed);
+    mutated = validHeader;
+    mutated[40] = 0x01;
+    mutated[4] = 0x25;  // Canonical RIFF size, but the payload is truncated.
+    CHECK_EQ(recorderParseWavHeader(mutated.data(), mutated.size(), 44, nullptr),
+             RecorderWavParseResult::Malformed);
+
+    mutated = validHeader;
+    mutated[20] = 0x03;
+    CHECK_EQ(recorderParseWavHeader(mutated.data(), mutated.size(), 44, nullptr),
+             RecorderWavParseResult::Unsupported);
+    mutated = validHeader;
+    mutated[22] = 0x02;
+    CHECK_EQ(recorderParseWavHeader(mutated.data(), mutated.size(), 44, nullptr),
+             RecorderWavParseResult::Unsupported);
+    mutated = validHeader;
+    mutated[34] = 0x08;
+    CHECK_EQ(recorderParseWavHeader(mutated.data(), mutated.size(), 44, nullptr),
+             RecorderWavParseResult::Unsupported);
+    mutated = validHeader;
+    mutated[24] = 0x44;
+    mutated[25] = 0xAC;
+    CHECK_EQ(recorderParseWavHeader(mutated.data(), mutated.size(), 44, nullptr),
+             RecorderWavParseResult::Unsupported);
+    mutated = validHeader;
+    mutated[28] = 0xFF;
+    CHECK_EQ(recorderParseWavHeader(mutated.data(), mutated.size(), 44, nullptr),
+             RecorderWavParseResult::Unsupported);
+    mutated = validHeader;
+    mutated[32] = 0x01;
+    CHECK_EQ(recorderParseWavHeader(mutated.data(), mutated.size(), 44, nullptr),
+             RecorderWavParseResult::Unsupported);
+}
+
+TEST_CASE(recorder_timestamp_candidates_require_a_real_calendar_time_and_capacity) {
+    char path[kRecorderPathCapacity]{};
+    CHECK(recorderTimestampPath({2024, 2, 29, 1, 2, 3}, path, sizeof(path)));
+    CHECK_STR_EQ(path, "/Recordings/REC_20240229_010203.WAV");
+    CHECK(recorderTimestampPath({2023, 12, 31, 23, 59, 59}, path, sizeof(path)));
+    CHECK_STR_EQ(path, "/Recordings/REC_20231231_235959.WAV");
+    CHECK(!recorderTimestampPath({2023, 2, 29, 0, 0, 0}, path, sizeof(path)));
+    CHECK(!recorderTimestampPath({1900, 2, 29, 0, 0, 0}, path, sizeof(path)));
+    CHECK(recorderTimestampPath({2000, 2, 29, 0, 0, 0}, path, sizeof(path)));
+    CHECK(!recorderTimestampPath({0, 1, 1, 0, 0, 0}, path, sizeof(path)));
+    CHECK(!recorderTimestampPath({2024, 13, 1, 0, 0, 0}, path, sizeof(path)));
+    CHECK(!recorderTimestampPath({2024, 1, 1, 24, 0, 0}, path, sizeof(path)));
+    CHECK(!recorderTimestampPath({2024, 1, 1, 0, 60, 0}, path, sizeof(path)));
+    CHECK(!recorderTimestampPath({2024, 1, 1, 0, 0, 60}, path, sizeof(path)));
+    CHECK(!recorderTimestampPath({2024, 1, 1, 0, 0, 0}, path, 35));
+}
+
+TEST_CASE(recorder_sequential_candidates_are_fixed_and_bounded) {
+    char path[kRecorderPathCapacity]{};
+    CHECK(recorderSequentialPath(0, path, sizeof(path)));
+    CHECK_STR_EQ(path, "/Recordings/REC_0000.WAV");
+    CHECK(recorderSequentialPath(42, path, sizeof(path)));
+    CHECK_STR_EQ(path, "/Recordings/REC_0042.WAV");
+    CHECK(recorderSequentialPath(9999, path, sizeof(path)));
+    CHECK_STR_EQ(path, "/Recordings/REC_9999.WAV");
+    CHECK(!recorderSequentialPath(10000, path, sizeof(path)));
+    CHECK(!recorderSequentialPath(0, nullptr, sizeof(path)));
+    CHECK(!recorderSequentialPath(0, path, 24));
+}
+
 TEST_CASE(media_app_maps_library_playback_volume_rescan_and_home) {
     MediaAppModel model;
     MediaAppInputState fileState{true, true, false, false};
@@ -2525,6 +2677,11 @@ int main() {
     media_library_filters_sorts_and_exposes_display_names();
     media_library_is_bounded_and_selection_wraps();
     media_progress_and_elapsed_clock_are_bounded_and_wrap_safe();
+    recorder_wav_builder_writes_the_canonical_44_byte_header();
+    recorder_wav_parser_returns_fixed_metadata_for_canonical_data();
+    recorder_wav_parser_rejects_malformed_and_unsupported_headers();
+    recorder_timestamp_candidates_require_a_real_calendar_time_and_capacity();
+    recorder_sequential_candidates_are_fixed_and_bounded();
     media_app_maps_library_playback_volume_rescan_and_home();
     media_volume_request_is_explicit_and_consumed_once();
     motion_app_navigates_three_pages_and_wraps();
