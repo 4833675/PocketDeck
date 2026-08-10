@@ -11,9 +11,8 @@ clear NVS/bonds, format TF, or record raw axes, gestures, or user input.
 
 ## Implemented behavior to verify
 
-- Three pages: `LIVE / 实时`, `LEVEL / 水平`, and `ACTIVITY / 活动`. Tab and Fn
-  Left/Right (or the local Fn Up/Down navigation mapping) change pages;
-  Backspace/G0 returns Home.
+- Three pages: `LIVE / 实时`, `LEVEL / 水平`, and `ACTIVITY / 活动`. Tab or Fn
+  Left/Right changes pages; Backspace/G0 returns Home.
 - LIVE shows accel X/Y/Z in `g` and gyro X/Y/Z in `deg/s`. LEVEL shows
   gravity-derived, smoothed roll/pitch; Enter makes the present attitude zero
   only for the current session. ACTIVITY shows STILL/MOVING/SHAKE, `|a|`, `|w|`,

@@ -14,8 +14,8 @@ This is the current handoff for the Pocket Deck repository. Read it with
   compass: no magnetometer, heading, or raw motion logging exists.
 - Motion sampling is foreground-only at 50 Hz and rendering up to 30 Hz. STILL
   is `<0.08 g` and `<10 deg/s`; SHAKE is `>=0.45 g` or `>=180 deg/s`, immediate,
-  500 ms latched; other transitions need five samples. Physical motion rows pending.
-- Native/target evidence: 1,182 checks, 91,080-byte RAM, 2,108,053-byte flash;
+  500 ms latched; data older than 500 ms is shown stale. Physical motion rows pending.
+- Native/target evidence: 1,187 checks, 91,080-byte RAM, 2,108,185-byte flash;
   not proof of IMU availability, orientation, rate, zero, shake, or isolation.
 - Existing hardware evidence: v0.9.6 SSH over direct Wi-Fi, BLE reconnect,
   Wi-Fi scan, TF logging, and MEDIA playback; LoRa/GPS/SSH/multi-Wi-Fi pending.

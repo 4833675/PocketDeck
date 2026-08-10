@@ -24,6 +24,8 @@ struct MotionLevel {
     float pitchDegrees = 0.0f;
 };
 
+bool motionSampleIsCurrent(bool hasSample, uint32_t nowMs, uint32_t lastSampleMs);
+
 class MotionClassifier {
 public:
     void update(const MotionSample& sample, uint32_t nowMs);

@@ -66,15 +66,13 @@ void drawHint(M5Canvas& canvas, MotionPage page, UiLanguage language) {
                       y + theme::kHintHeight / 2);
 }
 
-void drawSensorMessage(M5Canvas& canvas, UiLanguage language, bool available) {
+void drawSensorMessage(M5Canvas& canvas, UiLanguage language,
+                       const char* english, const char* chinese, uint16_t color) {
     setUiFont(canvas, language);
     canvas.setTextDatum(middle_center);
-    canvas.setTextColor(available ? theme::kWarning : theme::kError,
-                        theme::kBackground);
-    canvas.drawString(
-        available ? localized(language, "WAITING FOR SAMPLE", "等待传感器数据")
-                  : localized(language, "IMU UNAVAILABLE", "IMU 不可用"),
-        config::kScreenWidth / 2, 62);
+    canvas.setTextColor(color, theme::kBackground);
+    canvas.drawString(localized(language, english, chinese),
+                      config::kScreenWidth / 2, 62);
 }
 
 void drawAxisColumn(M5Canvas& canvas, int16_t x, const char* heading,
@@ -225,9 +223,15 @@ void MotionApp::render(Display& display, const SystemContext& context) {
     const ImuSnapshot imu = context.imu != nullptr ? context.imu->snapshot()
                                                    : ImuSnapshot{};
     if (!imu.available) {
-        drawSensorMessage(canvas, language, false);
+        drawSensorMessage(canvas, language, "IMU UNAVAILABLE", "IMU 不可用",
+                          theme::kError);
     } else if (!imu.hasSample) {
-        drawSensorMessage(canvas, language, true);
+        drawSensorMessage(canvas, language, "WAITING FOR SAMPLE", "等待传感器数据",
+                          theme::kWarning);
+    } else if (!motionSampleIsCurrent(imu.hasSample, context.uptimeMs,
+                                      imu.lastSampleMs)) {
+        drawSensorMessage(canvas, language, "SENSOR DATA STALE", "传感器数据过期",
+                          theme::kWarning);
     } else {
         switch (page) {
             case MotionPage::Live: drawLive(canvas, imu, language); break;

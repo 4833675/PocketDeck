@@ -293,8 +293,8 @@ minutes.
 
 MOTION / 运动 uses the Cardputer Adv's **BMI270 accelerometer and gyroscope**.
 It has no magnetometer, so it does not provide a compass, heading, or absolute
-orientation. Enter it from Home and use Tab, Fn + Left/Right, or Fn + Up/Down
-to move through its three pages:
+orientation. Enter it from Home and use Tab or Fn + Left/Right to move through
+its three pages:
 
 1. `LIVE / 实时` shows X/Y/Z acceleration in `g` and X/Y/Z angular velocity in
    `deg/s`.

@@ -2132,6 +2132,16 @@ TEST_CASE(motion_app_back_requests_home_without_changing_page) {
     CHECK_EQ(model.handle(InputAction::None).effect, MotionAppEffect::None);
 }
 
+TEST_CASE(motion_sample_current_policy_is_bounded_and_wrap_safe) {
+    CHECK(!motionSampleIsCurrent(false, 1000u, 1000u));
+    CHECK(motionSampleIsCurrent(true, 1500u, 1000u));
+    CHECK(!motionSampleIsCurrent(true, 1501u, 1000u));
+
+    constexpr uint32_t lastSampleMs = 0xFFFFFF00u;
+    CHECK(motionSampleIsCurrent(true, lastSampleMs + 500u, lastSampleMs));
+    CHECK(!motionSampleIsCurrent(true, lastSampleMs + 501u, lastSampleMs));
+}
+
 TEST_CASE(motion_level_uses_roll_pitch_formula_and_alpha_filter) {
     MotionClassifier classifier;
     classifier.update(MotionSample{0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f}, 0);
@@ -2371,6 +2381,7 @@ int main() {
     motion_app_navigates_three_pages_and_wraps();
     motion_app_confirm_emits_page_specific_one_shot_effects();
     motion_app_back_requests_home_without_changing_page();
+    motion_sample_current_policy_is_bounded_and_wrap_safe();
     motion_level_uses_roll_pitch_formula_and_alpha_filter();
     motion_exposes_acceleration_and_gyro_magnitudes();
     motion_still_thresholds_are_strict();

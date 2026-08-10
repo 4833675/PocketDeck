@@ -13,12 +13,17 @@ constexpr float kShakeAccelerationDeviation = 0.45f;
 constexpr float kShakeGyroMagnitude = 180.0f;
 constexpr uint8_t kHysteresisSamples = 5;
 constexpr uint32_t kShakeLatchMs = 500u;
+constexpr uint32_t kSampleCurrentMs = 500u;
 
 float magnitude(float x, float y, float z) {
     return std::sqrt(x * x + y * y + z * z);
 }
 
 }  // namespace
+
+bool motionSampleIsCurrent(bool hasSample, uint32_t nowMs, uint32_t lastSampleMs) {
+    return hasSample && static_cast<uint32_t>(nowMs - lastSampleMs) <= kSampleCurrentMs;
+}
 
 void MotionClassifier::update(const MotionSample& sample, uint32_t nowMs) {
     const MotionLevel rawLevel{
