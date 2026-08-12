@@ -2,6 +2,10 @@
 
 namespace pd {
 
+MotionLevelScreenAxes motionLevelScreenAxes(float rollDegrees, float pitchDegrees) {
+    return {pitchDegrees, rollDegrees};
+}
+
 MotionAppResult MotionAppModel::handle(InputAction action) {
     constexpr uint8_t kPageCount = 3;
     uint8_t index = static_cast<uint8_t>(page_);

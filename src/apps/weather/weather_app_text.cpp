@@ -78,6 +78,9 @@ const char* localizedWeatherErrorLabel(const char* error,
         return "无法启动天气任务";
     }
     if (std::strcmp(error, "Wi-Fi disconnected") == 0) return "Wi-Fi 已断开";
+    if (std::strcmp(error, "Weather DNS lookup failed") == 0) {
+        return "天气 DNS 解析失败";
+    }
     if (std::strcmp(error, "Unable to open weather endpoint") == 0) {
         return "无法连接天气服务";
     }

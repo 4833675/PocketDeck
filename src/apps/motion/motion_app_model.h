@@ -23,6 +23,13 @@ struct MotionAppResult {
     MotionAppEffect effect = MotionAppEffect::None;
 };
 
+struct MotionLevelScreenAxes {
+    float xDegrees = 0.0f;
+    float yDegrees = 0.0f;
+};
+
+MotionLevelScreenAxes motionLevelScreenAxes(float rollDegrees, float pitchDegrees);
+
 class MotionAppModel {
 public:
     MotionPage page() const { return page_; }

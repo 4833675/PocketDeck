@@ -19,10 +19,11 @@ Target firmware: `0.9.4` or later on M5Stack Cardputer Adv.
 | COEX-01 | Type during scan/connect | BLE HID remains connected and responsive | Pending | |
 | GPS-01 | Open GPS while Wi-Fi is connected | GPS stream and FIX continue | Pending | |
 | WX-01 | Open Weather with Wi-Fi but no GPS fix | Screen requests a fresh GPS fix | Pending | |
-| WX-02 | Open Weather with Wi-Fi and GPS fix | Current weather, high/low, sunrise/sunset appear | Pending | |
+| WX-02 | Open Weather with Wi-Fi and GPS fix | Current weather, high/low, sunrise/sunset appear | Passed 2026-08-10 | User observed restored live weather; serial recorded `Weather state: READY` after app-scoped Media/Recorder allocation recovered 22,528 bytes of static RAM. |
 | WX-03 | Press Enter in Weather | A manual refresh completes without freezing UI | Pending | |
 | WX-04 | Disconnect GPS after a successful forecast | Existing weather remains with an amber cached/GPS status | Pending | |
 | WX-05 | Fail a refresh after a successful forecast | Existing weather remains with an update-error status | Pending | |
 | WX-06 | Simplified Chinese | Inspect live, waiting, offline, cached, and error states in Chinese. | Weather condition, labels, status, age, hints, and common errors are Chinese without clipping or missing glyphs. | Pending | |
 | WX-07 | Runtime language switch | Switch Chinese/English and reopen Weather. | Weather updates immediately in both directions while numeric values and units remain unchanged. | Pending | |
+| WX-08 | Trigger one failed Weather refresh, then read `LOG DUMP` | `Weather route` includes DNS result/time and resolved service IP; `Weather detail` includes stage, HTTP/TLS codes, request time, general heap, and DMA-capable heap without coordinates or SSIDs | Pending | A temporary probe proved DNS and TCP/443 worked and exposed `esp-sha: Failed to allocate buf memory`; production uses one HTTPS connection and records DMA heap instead of opening a second TCP socket. |
 | RESET-01 | Factory reset | App settings, all Wi-Fi profiles, and BLE bond are erased | Pending | |

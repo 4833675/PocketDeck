@@ -25,6 +25,7 @@
 #include "apps/ssh/ssh_app_model.h"
 #include "apps/ssh/ssh_app_text.h"
 #include "core/ble_keyboard_policy.h"
+#include "core/app_scoped_service.h"
 #include "core/clock_data.h"
 #include "core/deferred_log_data.h"
 #include "core/g0_gesture.h"
@@ -63,6 +64,17 @@ using namespace pd;
 
 namespace {
 
+struct ScopedServiceProbe {
+    ScopedServiceProbe() { ++constructed; }
+    ~ScopedServiceProbe() { ++destroyed; }
+
+    static int constructed;
+    static int destroyed;
+};
+
+int ScopedServiceProbe::constructed = 0;
+int ScopedServiceProbe::destroyed = 0;
+
 struct DiagnosticSinkCapture {
     std::array<std::array<char, DiagnosticsService::kAsyncMessageCapacity>, 8> messages{};
     std::size_t count = 0;
@@ -77,6 +89,26 @@ void captureDiagnostic(void* context, const char* message) {
 }
 
 }  // namespace
+
+TEST_CASE(app_scoped_service_releases_memory_outside_its_foreground_app) {
+    ScopedServiceProbe::constructed = 0;
+    ScopedServiceProbe::destroyed = 0;
+
+    AppScopedService<ScopedServiceProbe> service;
+    CHECK(service.get() == nullptr);
+
+    CHECK(service.setActive(true));
+    CHECK(service.get() != nullptr);
+    CHECK_EQ(ScopedServiceProbe::constructed, 1);
+    CHECK_EQ(ScopedServiceProbe::destroyed, 0);
+
+    CHECK(service.setActive(true));
+    CHECK_EQ(ScopedServiceProbe::constructed, 1);
+
+    CHECK(service.setActive(false));
+    CHECK(service.get() == nullptr);
+    CHECK_EQ(ScopedServiceProbe::destroyed, 1);
+}
 
 TEST_CASE(app_resource_profiles_isolate_foreground_workloads) {
     const auto launcher = resourceProfileFor(AppId::Launcher);
@@ -909,6 +941,9 @@ TEST_CASE(weather_localized_text_covers_conditions_states_and_errors) {
     CHECK_STR_EQ(localizedWeatherErrorLabel("Weather HTTP request failed",
                                             UiLanguage::SimplifiedChinese),
                  "天气请求失败");
+    CHECK_STR_EQ(localizedWeatherErrorLabel("Weather DNS lookup failed",
+                                            UiLanguage::SimplifiedChinese),
+                 "天气 DNS 解析失败");
     CHECK_STR_EQ(localizedWeatherErrorLabel("custom detail",
                                             UiLanguage::SimplifiedChinese),
                  "custom detail");
@@ -1621,6 +1656,37 @@ TEST_CASE(weather_display_keeps_successful_data_when_inputs_disappear) {
     CHECK_EQ(classifyWeatherDisplay(weather, true, true, true),
              WeatherDisplayState::CachedError);
     CHECK(weatherDisplayShowsData(WeatherDisplayState::CachedError));
+}
+
+TEST_CASE(weather_failure_diagnostics_preserve_route_and_dma_memory_evidence) {
+    WeatherFailureDiagnostics diagnostics;
+    diagnostics.stage = WeatherFailureStage::ConnectTls;
+    diagnostics.dnsResolved = true;
+    diagnostics.resolvedAddress = {188, 40, 99, 226};
+    diagnostics.httpStatus = -1;
+    diagnostics.tlsError = -29184;
+    diagnostics.dnsElapsedMs = 12;
+    diagnostics.requestElapsedMs = 8001;
+    diagnostics.freeHeapBefore = 52000;
+    diagnostics.largestHeapBefore = 31000;
+    diagnostics.freeHeapAfter = 41000;
+    diagnostics.largestHeapAfter = 22000;
+    diagnostics.dmaFreeBefore = 12000;
+    diagnostics.dmaLargestBefore = 8000;
+    diagnostics.dmaFreeAfter = 4000;
+    diagnostics.dmaLargestAfter = 128;
+
+    std::array<char, 160> line{};
+    CHECK(formatWeatherFailureDiagnostics(diagnostics, line.data(), line.size()));
+    CHECK_STR_EQ(
+        line.data(),
+        "stage=CONNECT_TLS dns=ok/12ms http=-1(CONNECT_FAILED) tls=-29184 "
+        "request=8001ms heap=52000/31000->41000/22000 "
+        "dma=12000/8000->4000/128");
+
+    std::array<char, 80> route{};
+    CHECK(formatWeatherRouteDiagnostics(diagnostics, route.data(), route.size()));
+    CHECK_STR_EQ(route.data(), "dns=ok/12ms ip=188.40.99.226");
 }
 
 TEST_CASE(gps_state_distinguishes_stream_search_fix_and_stale) {
@@ -2931,6 +2997,12 @@ TEST_CASE(motion_level_uses_roll_pitch_formula_and_alpha_filter) {
     CHECK(std::fabs(classifier.level().pitchDegrees + 18.0f) < 0.01f);
 }
 
+TEST_CASE(motion_level_screen_axes_follow_cardputer_orientation) {
+    const MotionLevelScreenAxes axes = motionLevelScreenAxes(18.0f, -7.0f);
+    CHECK(std::fabs(axes.xDegrees - (-7.0f)) < 0.001f);
+    CHECK(std::fabs(axes.yDegrees - 18.0f) < 0.001f);
+}
+
 TEST_CASE(motion_exposes_acceleration_and_gyro_magnitudes) {
     MotionClassifier classifier;
     classifier.update(MotionSample{0.0f, 0.0f, 1.3f, 3.0f, 4.0f, 12.0f}, 0);
@@ -3043,6 +3115,7 @@ TEST_CASE(motion_peak_tracks_maximum_and_reset_uses_current_sample) {
 }
 
 int main() {
+    app_scoped_service_releases_memory_outside_its_foreground_app();
     app_resource_profiles_isolate_foreground_workloads();
     motion_is_the_only_app_requesting_the_imu();
     remote_is_the_only_app_requesting_ir();
@@ -3122,6 +3195,7 @@ int main() {
     ssh_app_requires_confirmation_before_deleting_a_host();
     local_clock_rejects_unsynced_time_and_applies_utc_offset();
     weather_display_keeps_successful_data_when_inputs_disappear();
+    weather_failure_diagnostics_preserve_route_and_dma_memory_evidence();
     gps_state_distinguishes_stream_search_fix_and_stale();
     gps_page_navigation_wraps_across_all_four_pages();
     gps_compass_points_cover_cardinal_and_intercardinal_directions();
@@ -3191,6 +3265,7 @@ int main() {
     motion_app_back_requests_home_without_changing_page();
     motion_sample_current_policy_is_bounded_and_wrap_safe();
     motion_level_uses_roll_pitch_formula_and_alpha_filter();
+    motion_level_screen_axes_follow_cardputer_orientation();
     motion_exposes_acceleration_and_gyro_magnitudes();
     motion_still_thresholds_are_strict();
     motion_shake_thresholds_are_inclusive();

@@ -1,6 +1,46 @@
 #include "core/weather_data.h"
 
+#include <cstdio>
+
 namespace pd {
+namespace {
+
+const char* weatherFailureStageLabel(WeatherFailureStage stage) {
+    switch (stage) {
+        case WeatherFailureStage::None: return "NONE";
+        case WeatherFailureStage::Wifi: return "WIFI";
+        case WeatherFailureStage::Task: return "TASK";
+        case WeatherFailureStage::Dns: return "DNS";
+        case WeatherFailureStage::Endpoint: return "ENDPOINT";
+        case WeatherFailureStage::ConnectTls: return "CONNECT_TLS";
+        case WeatherFailureStage::HttpTransport: return "HTTP_TRANSPORT";
+        case WeatherFailureStage::HttpResponse: return "HTTP_RESPONSE";
+        case WeatherFailureStage::Parse: return "PARSE";
+        case WeatherFailureStage::Fields: return "FIELDS";
+    }
+    return "UNKNOWN";
+}
+
+const char* weatherHttpStatusLabel(int16_t status) {
+    switch (status) {
+        case 0: return "NONE";
+        case -1: return "CONNECT_FAILED";
+        case -2: return "SEND_HEADER_FAILED";
+        case -3: return "SEND_PAYLOAD_FAILED";
+        case -4: return "NOT_CONNECTED";
+        case -5: return "CONNECTION_LOST";
+        case -6: return "NO_STREAM";
+        case -7: return "NO_HTTP_SERVER";
+        case -8: return "LOW_MEMORY";
+        case -9: return "ENCODING";
+        case -10: return "STREAM_WRITE";
+        case -11: return "READ_TIMEOUT";
+        case 200: return "OK";
+        default: return status > 0 ? "HTTP_RESPONSE" : "TRANSPORT_ERROR";
+    }
+}
+
+}  // namespace
 
 const char* weatherStateLabel(WeatherState state) {
     switch (state) {
@@ -51,6 +91,46 @@ bool weatherDisplayShowsData(WeatherDisplayState state) {
            state == WeatherDisplayState::CachedNoGps ||
            state == WeatherDisplayState::CachedOffline ||
            state == WeatherDisplayState::CachedError;
+}
+
+bool formatWeatherFailureDiagnostics(const WeatherFailureDiagnostics& diagnostics,
+                                     char* output, std::size_t capacity) {
+    if (output == nullptr || capacity == 0) return false;
+    const int written = std::snprintf(
+        output, capacity,
+        "stage=%s dns=%s/%lums http=%d(%s) tls=%ld request=%lums "
+        "heap=%lu/%lu->%lu/%lu dma=%lu/%lu->%lu/%lu",
+        weatherFailureStageLabel(diagnostics.stage),
+        diagnostics.dnsResolved ? "ok" : "fail",
+        static_cast<unsigned long>(diagnostics.dnsElapsedMs),
+        static_cast<int>(diagnostics.httpStatus),
+        weatherHttpStatusLabel(diagnostics.httpStatus),
+        static_cast<long>(diagnostics.tlsError),
+        static_cast<unsigned long>(diagnostics.requestElapsedMs),
+        static_cast<unsigned long>(diagnostics.freeHeapBefore),
+        static_cast<unsigned long>(diagnostics.largestHeapBefore),
+        static_cast<unsigned long>(diagnostics.freeHeapAfter),
+        static_cast<unsigned long>(diagnostics.largestHeapAfter),
+        static_cast<unsigned long>(diagnostics.dmaFreeBefore),
+        static_cast<unsigned long>(diagnostics.dmaLargestBefore),
+        static_cast<unsigned long>(diagnostics.dmaFreeAfter),
+        static_cast<unsigned long>(diagnostics.dmaLargestAfter));
+    return written >= 0 && static_cast<std::size_t>(written) < capacity;
+}
+
+bool formatWeatherRouteDiagnostics(const WeatherFailureDiagnostics& diagnostics,
+                                   char* output, std::size_t capacity) {
+    if (output == nullptr || capacity == 0) return false;
+    const int written = std::snprintf(
+        output, capacity,
+        "dns=%s/%lums ip=%u.%u.%u.%u",
+        diagnostics.dnsResolved ? "ok" : "fail",
+        static_cast<unsigned long>(diagnostics.dnsElapsedMs),
+        static_cast<unsigned>(diagnostics.resolvedAddress[0]),
+        static_cast<unsigned>(diagnostics.resolvedAddress[1]),
+        static_cast<unsigned>(diagnostics.resolvedAddress[2]),
+        static_cast<unsigned>(diagnostics.resolvedAddress[3]));
+    return written >= 0 && static_cast<std::size_t>(written) < capacity;
 }
 
 }  // namespace pd

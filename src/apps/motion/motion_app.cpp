@@ -150,10 +150,12 @@ void drawLevel(M5Canvas& canvas, const ImuSnapshot& imu, UiLanguage language) {
     canvas.drawFastHLine(boxX + 3, centerY, boxW - 6, theme::kBorder);
     canvas.drawFastVLine(centerX, boxY + 3, boxH - 6, theme::kBorder);
 
+    const MotionLevelScreenAxes levelAxes =
+        motionLevelScreenAxes(imu.rollDegrees, imu.pitchDegrees);
     const int16_t bubbleX = centerX + static_cast<int16_t>(
-        clampBubbleAngle(imu.rollDegrees) * maxXOffset / kBubbleLimitDegrees);
+        clampBubbleAngle(levelAxes.xDegrees) * maxXOffset / kBubbleLimitDegrees);
     const int16_t bubbleY = centerY - static_cast<int16_t>(
-        clampBubbleAngle(imu.pitchDegrees) * maxYOffset / kBubbleLimitDegrees);
+        clampBubbleAngle(levelAxes.yDegrees) * maxYOffset / kBubbleLimitDegrees);
     canvas.fillCircle(bubbleX, bubbleY, bubbleRadius, theme::kPrimary);
     canvas.drawCircle(bubbleX, bubbleY, bubbleRadius, theme::kText);
 }

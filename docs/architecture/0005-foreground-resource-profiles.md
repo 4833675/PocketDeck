@@ -30,6 +30,10 @@ service but cannot override a user-disabled setting. Initialization and activity
 are separate: NimBLE stays initialized so bonds survive, the TF card stays
 mounted, and services expose inexpensive suspend/resume transitions.
 
+MEDIA and RECORDER are the memory-lifecycle exception defined by ADR-0008:
+their large service objects are created only for their foreground profile and
+destroyed after the old app completes `onExit`.
+
 MEDIA defers synchronous system-log writes into a small bounded queue. The queue
 is flushed only after playback has released its file on application exit.
 

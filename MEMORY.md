@@ -1,20 +1,21 @@
 # Pocket Deck project memory
 
-Last updated: 2026-08-10
+Last updated: 2026-08-12
 
 Read this with `AGENTS.md` before substantial work. `README.md` is the public
 guide; `docs/validation/` holds reusable hardware checklists.
 
 ## Current state
 
-- Repository: `https://github.com/4833675/PocketDeck`; public version remains
-  `0.9.6` until the user explicitly requests a GitHub sync.
+- Repository: `https://github.com/4833675/PocketDeck`; README firmware version
+  remains `0.9.6` while MOTION, REMOTE, RECORDER, and subsequent fixes are being
+  synchronized to `main` as source history rather than as a tagged release.
 - RECORDER runtime integration is commit `d12f8fd`, with review fixes in
   `50aa619` and deferred-log hardening in `7799301`; documentation is in
   `518cb22` and `6485819`.
-- Automated final-integrated evidence: `scripts/test-native.sh` passed 1,855
+- Automated final-integrated evidence: `scripts/test-native.sh` passed 1,872
   checks; `git diff --check` passed; `pio run -e cardputer-adv` passed with RAM
-  `104824 / 327680` bytes (32.0%) and flash `2133097 / 3145728` bytes (67.8%).
+  `82344 / 327680` bytes (25.1%) and flash `2134837 / 3145728` bytes (67.9%).
   This is source/build evidence only, not physical hardware proof.
 - Physical Recorder checks are all pending. Do not infer microphone capture,
   WAV finalization, speaker/AUX playback, recovery, resource isolation, or
@@ -57,6 +58,8 @@ guide; `docs/validation/` holds reusable hardware checklists.
   logs. Sample no faster than 20 ms; stale after 500 ms. STILL is below both
   `0.08 g` and `10 deg/s`; SHAKE is at least either `0.45 g` or `180 deg/s`,
   immediate and latched 500 ms; other changes need five candidate samples.
+  LEVEL bubble uses Cardputer screen orientation: pitch drives X and roll drives
+  Y; the displayed roll/pitch values and zeroing semantics remain unchanged.
 - REMOTE / 遥控器: fixed Sony KD-65X9100H IR only. Each press is initial frame
   plus two repeats. `SENT / 已发送` is local-call status, never TV receipt; no
   receiver, learner, other-brand mode, or hold repeat exists.
@@ -84,6 +87,11 @@ guide; `docs/validation/` holds reusable hardware checklists.
 - Resource profiles turn on only what a foreground app requires. MEDIA and
   RECORDER realtime modes suspend BLE, Wi-Fi, GPS, and LoRa work and defer TF
   diagnostics; deferred diagnostics flush only after active audio files close.
+- `AppScopedService` creates the large MEDIA or RECORDER service only while its
+  app is foreground and destroys it after that app's `onExit`. This returns
+  22,528 bytes of static residency to the general/internal-DMA heap and leaves
+  the corresponding `SystemContext` pointer null in every other app. See
+  ADR-0008; callers must always handle that null pointer.
 - MEDIA is one intentional long-lived audio/TF exception: one read-only MP3 may
   stay open only during foreground playback.
 - RECORDER is the second intentional long-lived audio/TF exception. It uses the
@@ -115,6 +123,15 @@ guide; `docs/validation/` holds reusable hardware checklists.
   not just the eight visible rows.
 - Weather retains the last successful response in RAM when GPS/Wi-Fi vanishes;
   only a refresh needs fresh inputs.
+- The 2026-08-10 Weather regression was memory pressure, not Clash, DNS, the
+  Open-Meteo route, or Wi-Fi: DNS and TCP/443 succeeded, then ESP-IDF logged
+  `esp-sha: Failed to allocate buf memory` during TLS. Permanent by-value MEDIA
+  and RECORDER objects consumed 22,528 bytes even while inactive. Making those
+  services app-scoped restored a physical request to `Weather state: READY`.
+  Production failure logs retain stage, DNS result/time and service IP, HTTP/TLS
+  codes, request time, and before/after general plus DMA-capable heap, without
+  coordinates or SSIDs. Do not add a second diagnostic TCP socket before HTTPS;
+  it perturbs the scarce memory being measured.
 - LoRa initializes on first app entry, listens only foreground, then warm-sleeps
   on exit. Missing Cap/error must not block GPS, TF, BLE, Wi-Fi, Weather, or SSH.
 - TF logs are state-change only, rotate at 4 MB through three archives, and
@@ -152,8 +169,10 @@ pio device monitor -e cardputer-adv
    including 30-second/multi-minute capture, final WAV/playback, error recovery,
    exit cleanup, checkpoints, MEDIA/system sounds/logs, LoRa, BLE/Wi-Fi/GPS/IR,
    and SSH public-key authentication after Recorder use.
-2. Run the MOTION, Sony REMOTE, LoRa, GPS, MEDIA, localization, resource-
-   isolation, and TF-log checklists; retain Pending until actually observed.
+2. Recheck MEDIA playback and RECORDER capture/playback after their app-scoped
+   ownership change, including MEDIA -> Weather and RECORDER -> Weather. Run the
+   remaining MOTION, Sony REMOTE, LoRa, GPS, localization, resource-isolation,
+   and TF-log checklist rows; retain Pending until actually observed.
 3. Validate SSH direct reconnect, Wi-Fi scan backoff and reconnect over several
    minutes, then recheck BLE typing/range-loss reconnect and persisted profiles.
 4. After owner confirmation, update only observed checklist rows, commit locally,

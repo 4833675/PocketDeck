@@ -14,10 +14,11 @@ clear NVS/bonds, format TF, or record raw axes, gestures, or user input.
 - Three pages: `LIVE / 实时`, `LEVEL / 水平`, and `ACTIVITY / 活动`. Tab or Fn
   Left/Right changes pages; Backspace/G0 returns Home.
 - LIVE shows accel X/Y/Z in `g` and gyro X/Y/Z in `deg/s`. LEVEL shows
-  gravity-derived, smoothed roll/pitch; Enter makes the present attitude zero
-  only for the current session. ACTIVITY shows STILL/MOVING/SHAKE, `|a|`, `|w|`,
-  and the session acceleration-deviation peak; Enter resets that peak to the
-  current value.
+  gravity-derived, smoothed roll/pitch; its Cardputer-oriented bubble maps pitch
+  to screen X and roll to screen Y. Enter makes the present attitude zero only
+  for the current session. ACTIVITY shows STILL/MOVING/SHAKE, `|a|`, `|w|`, and
+  the session acceleration-deviation peak; Enter resets that peak to the current
+  value.
 - While foreground, the service attempts one complete accel+gyro sample no more
   often than every 20 ms (50 Hz); normal non-MEDIA screen rendering is at most
   every 33 ms (up to 30 Hz). Exiting MOTION removes its IMU resource request.
@@ -37,8 +38,8 @@ These results validate the current source, not physical hardware behavior.
 
 | ID | Command | Expected | Result | Evidence |
 |---|---|---|---|---|
-| MOTION-BUILD-01 | `scripts/test-native.sh` | Native checks pass | Passed | `PASS: 1855 checks` |
-| MOTION-BUILD-02 | `pio run -e cardputer-adv` | Target builds | Passed | RAM `104824` bytes; flash `2133097` bytes |
+| MOTION-BUILD-01 | `scripts/test-native.sh` | Native checks pass | Passed | `PASS: 1857 checks` |
+| MOTION-BUILD-02 | `pio run -e cardputer-adv` | Target builds | Passed | RAM `104824` bytes; flash `2133125` bytes |
 
 ## Physical Cardputer Adv checks
 
@@ -49,7 +50,7 @@ pending; no hardware success is claimed by this checklist.
 |---|---|---|---|---|
 | MOTION-01 | Open `MOTION / 运动` from Home | Three pages navigate and localized titles/hints fit; Backspace and G0 return Home | Pending | |
 | MOTION-02 | Axis response: slowly orient the Cardputer along each physical axis | LIVE accel/gyro X/Y/Z respond with plausible signs and units; no compass/heading is shown | Pending | |
-| MOTION-03 | Level zero: hold a stable chosen attitude on LEVEL, press Enter, then move and return | Roll/pitch read near zero at the chosen attitude, change when tilted, and remain session-only after restart | Pending | |
+| MOTION-03 | Level axes/zero: tilt along each screen axis, hold a stable attitude, press Enter, then move and return | Bubble X follows pitch and bubble Y follows roll; readings zero at the chosen attitude and remain session-only after restart | Pending | |
 | MOTION-04 | Stationary stability: leave the device still for at least several seconds | ACTIVITY settles to STILL without rapid flicker; normal small noise does not spuriously SHAKE | Pending | |
 | MOTION-05 | Gentle continuous movement | ACTIVITY becomes MOVING only after five candidate samples and returns to STILL only after five still candidates | Pending | |
 | MOTION-06 | Shake/latch: cross either documented shake threshold, then stop | SHAKE appears immediately and remains visible for at least 500 ms before non-shake hysteresis resumes | Pending | |

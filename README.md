@@ -37,7 +37,8 @@ Current firmware: **0.9.6**
   and bounded recording list.
 - Foreground resource profiles: each app runs only the radios and peripherals
   it needs; MEDIA and RECORDER suspend wireless/GPS/LoRa work and defer TF
-  event writes while their audio activity is foreground.
+  event writes while their audio activity is foreground. Their large libraries
+  and audio buffers are also allocated only while the owning app is open.
 - Versioned Preferences/NVS settings and confirmed destructive actions.
 - On-device diagnostics plus privacy-safe event logs for every app/service on a
   TF/microSD card.

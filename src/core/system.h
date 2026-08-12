@@ -3,6 +3,7 @@
 #include <array>
 #include <cstddef>
 
+#include "core/app_scoped_service.h"
 #include "apps/gps/gps_app.h"
 #include "apps/keyboard/keyboard_app.h"
 #include "apps/launcher/launcher_app.h"
@@ -71,8 +72,8 @@ private:
     ImuService imu_;
     IrService ir_;
     LoRaService lora_;
-    MediaService media_;
-    RecorderService recorder_;
+    AppScopedService<MediaService> media_;
+    AppScopedService<RecorderService> recorder_;
     WifiService wifi_;
     WeatherService weather_;
     SdLogService sdLog_;

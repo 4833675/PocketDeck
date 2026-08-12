@@ -80,8 +80,8 @@ void System::begin() {
     context_.imu = &imu_;
     context_.ir = &ir_;
     context_.lora = &lora_;
-    context_.media = &media_;
-    context_.recorder = &recorder_;
+    context_.media = media_.get();
+    context_.recorder = recorder_.get();
     context_.wifi = &wifi_;
     context_.weather = &weather_;
     context_.sdLog = &sdLog_;
@@ -100,8 +100,6 @@ void System::begin() {
     } else if (!loaded.found) {
         diagnostics_.log("Settings defaults loaded");
     }
-    recorder_.setRestorationVolume(settings_.volume);
-
     const bool detected = board_.begin();
     diagnostics_.logf("Board init: Cardputer ADV=%d", detected ? 1 : 0);
     const bool imuReady = imu_.begin();
@@ -145,8 +143,8 @@ void System::update() {
     imu_.update(nowMs);
     gps_.update();
     lora_.update(nowMs);
-    media_.update(nowMs);
-    recorder_.update(nowMs);
+    if (media_.get() != nullptr) media_.get()->update(nowMs);
+    if (recorder_.get() != nullptr) recorder_.get()->update(nowMs);
     wifi_.update(nowMs);
     bleKeyboard_.update(nowMs);
     diagnostics_.drainPending();
@@ -310,6 +308,19 @@ void System::applyResourceProfile(AppId id) {
     const bool imuRequested = next.needs(RuntimeResource::Imu);
     const bool irRequested = next.needs(RuntimeResource::Ir);
     const bool loraActive = next.needs(RuntimeResource::LoRa);
+    const bool mediaRequested = next.needs(RuntimeResource::MediaRealtime);
+    const bool recorderRequested = next.needs(RuntimeResource::RecorderRealtime);
+    const bool mediaReady = media_.setActive(mediaRequested);
+    const bool recorderReady = recorder_.setActive(recorderRequested);
+    context_.media = media_.get();
+    context_.recorder = recorder_.get();
+    if (context_.recorder != nullptr) {
+        context_.recorder->setRestorationVolume(settings_.volume);
+    }
+    if (mediaRequested && !mediaReady) diagnostics_.log("MEDIA service allocation failed");
+    if (recorderRequested && !recorderReady) {
+        diagnostics_.log("RECORDER service allocation failed");
+    }
     bleKeyboard_.setActive(bleRequested);
     wifi_.setActive(wifiRequested);
     gps_.setActive(gpsActive);
@@ -366,7 +377,9 @@ void System::handleQuickSettingsResult(const QuickSettingsResult& result) {
         settings_.bleEnabled = values.bleEnabled;
         board_.setBrightness(settings_.brightness);
         board_.setVolume(settings_.volume);
-        if (volumeChanged) recorder_.setRestorationVolume(settings_.volume);
+        if (volumeChanged && recorder_.get() != nullptr) {
+            recorder_.get()->setRestorationVolume(settings_.volume);
+        }
         if (bleChanged) {
             bleKeyboard_.setEnabled(settings_.bleEnabled);
             applyResourceProfile(current_ != nullptr ? current_->id() : AppId::Launcher);
@@ -464,7 +477,9 @@ void System::handleSystemCommand(SystemCommand command) {
                 settings_.volume = static_cast<uint8_t>(adjusted);
                 context_.volumePercent = settings_.volume;
                 board_.setVolume(settings_.volume);
-                recorder_.setRestorationVolume(settings_.volume);
+                if (recorder_.get() != nullptr) {
+                    recorder_.get()->setRestorationVolume(settings_.volume);
+                }
                 diagnostics_.logf("Volume changed: %u",
                                   static_cast<unsigned>(settings_.volume));
                 saveSettings();
@@ -604,6 +619,16 @@ void System::trackWeatherState(const WeatherSnapshot& snapshot) {
         diagnostics_.logf("Weather state: %s", weatherStateLabel(snapshot.state));
         if (snapshot.state == WeatherState::Error && snapshot.error[0] != '\0') {
             diagnostics_.logf("Weather error: %.30s", snapshot.error.data());
+            std::array<char, 80> route{};
+            if (formatWeatherRouteDiagnostics(snapshot.failureDiagnostics,
+                                              route.data(), route.size())) {
+                diagnostics_.logf("Weather route: %s", route.data());
+            }
+            std::array<char, 144> detail{};
+            if (formatWeatherFailureDiagnostics(snapshot.failureDiagnostics,
+                                                detail.data(), detail.size())) {
+                diagnostics_.logf("Weather detail: %s", detail.data());
+            }
         }
         lastWeatherState_ = snapshot.state;
         lastWeatherStateValid_ = true;

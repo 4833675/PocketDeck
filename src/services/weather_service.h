@@ -18,7 +18,8 @@ private:
     static void fetchTask(void* context);
     void performFetch();
     void publish(const WeatherSnapshot& snapshot);
-    void publishError(const char* message, int16_t httpStatus = 0);
+    void publishError(const char* message,
+                      const WeatherFailureDiagnostics& diagnostics);
 
     mutable portMUX_TYPE mux_ = portMUX_INITIALIZER_UNLOCKED;
     WeatherSnapshot snapshot_{};
